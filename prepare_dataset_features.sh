@@ -31,20 +31,22 @@ AUGMENT=true # indicates, whether to peform augmentation. Kaldi has to be set up
 repo_root=$PWD #NOTE: you can change this to match your system...
 KALDI=$repo_root/kaldi
 nj_features=4 # number of CPU workers used for feature extraction
-utt_count=20 # the number of generated utterances
+utt_count=200 # the number of generated utterances
 kaldi_root=$repo_root/kaldi/egs/pvad # only valid if Kaldi is set up..
-feature_dir_name=features_demo # change this to whatever you want your feature dir to be named...
+feature_dir_name=reverb_200_test # change this to whatever you want your feature dir to be named...
 
 # Here, you can specify the LibriSpeech folders used by the data preparation scripts.
 # Make sure that you have the subsets downloaded and unzipped before using them..
 libri_folders=()
-libri_folders+="dev-clean"
-#libri_folders+=" dev-other"
-#libri_folders+=" test-clean"
-#libri_folders+=" test-other"
-#libri_folders+=" train-clean-100"
-#libri_folders+=" train-clean-360"
-#libri_folders+=" train-other-500"
+# libri_folders+="dev-clean"
+# libri_folders+=" dev-other"
+libri_folders+=" test-clean"
+libri_folders+=" test-other"
+# libri_folders+=" train-clean-100"
+# libri_folders+=" train-clean-360"
+# libri_folders+=" train-other-500"
+
+export NAME=clean
 
 # set the NAME env variable prior to running this script if you wish to use a different
 # name for the concatenated dataset folder than 'clean'

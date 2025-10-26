@@ -43,7 +43,22 @@ SAVE_MODEL = True
 
 NUM_WORKERS = 2
 
-device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+# More verbose device detection to help debugging when CUDA is not available.
+cuda_available = torch.cuda.is_available()
+if cuda_available:
+    try:
+        cuda_count = torch.cuda.device_count()
+    except Exception:
+        cuda_count = 0
+    try:
+        dev_name = torch.cuda.get_device_name(0) if cuda_count > 0 else 'unknown'
+    except Exception:
+        dev_name = 'unknown'
+    print(f"CUDA available. torch.version.cuda={torch.version.cuda}, cuda_count={cuda_count}, device_name={dev_name}")
+    device = torch.device('cuda')
+else:
+    print("CUDA not available. Using CPU. If you expect to use a GPU, check your NVIDIA driver, WSL setup (if applicable), and that your PyTorch installation supports your GPU compute capability.")
+    device = torch.device('cpu')
 
 class VadDataset(Dataset):
     """Vad dataset class. Uses kaldi scp and ark files."""
@@ -67,8 +82,15 @@ class VadDataset(Dataset):
         # convert the PVAD labels to speech/non-speech only
         y = (y != 0).astype('int')
 
-        x = torch.from_numpy(x).float()
-        y = torch.from_numpy(y).long()
+        # ensure arrays are writable and contiguous before converting to tensors
+        # PyTorch rejects non-writable numpy arrays when creating tensors.
+        if not (hasattr(x, 'flags') and x.flags.writeable and x.flags['C_CONTIGUOUS']):
+            x = np.ascontiguousarray(x)
+        if not (hasattr(y, 'flags') and y.flags.writeable and y.flags['C_CONTIGUOUS']):
+            y = np.ascontiguousarray(y)
+
+        x = torch.from_numpy(x.copy()).float()
+        y = torch.from_numpy(y.copy()).long()
         return x, y
 
 

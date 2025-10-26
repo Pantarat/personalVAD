@@ -23,12 +23,13 @@ import numpy as np
 from glob import glob
 
 KEEP_TEXT = False
-N = 10000 # The number of generated utterances
-FILES_PER_DIR = 2000
+N = 5000 # The number of generated utterances
+FILES_PER_DIR = 500
 FLAC = True # if true, flac will be used to load the waveform. If false, sox will be used.
 UNIQUE = True # if true, each source utterance can only be used once...
 
-SETS = ['dev-clean', 'dev-other', 'test-clean', 'test-other']
+SETS = ['dev-clean', 'dev-other', 'test-clean', 'test-other', 'train-clean-100',
+        'train-clean-360', 'train-other-500']
 wav_scp_prefix = 'data/clean/'
 
 def parse_alignments(path):
@@ -279,7 +280,7 @@ if __name__ == '__main__':
     # now create the destination directory
     if os.path.exists(dest):
         if not os.path.isdir(dest) or os.listdir(dest):
-            print('The specified destination folder is an existing file/directory')
+            print(f'The specified destination folder {dest} is an existing file/directory')
             sys.exit(1)
     else:
         try:

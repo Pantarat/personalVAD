@@ -39,10 +39,12 @@ six==1.16.0
 SoundFile==0.10.3.post1
 speechbrain==0.5.7
 threadpoolctl==2.1.0
-torch==1.7.1
-torchaudio==0.8.1
+torch
+torchaudio
 tqdm==4.60.0
 typing==3.7.4.3
 typing-extensions==3.10.0.0
 urllib3==1.26.5
-webrtcvad==2.0.10
+webrtcvad-wheels
+
+

@@ -13,11 +13,23 @@
 # is available here: https://github.com/kaldi-asr/kaldi/blob/master/egs/sitw/v2/run.sh
 # 
 
+# Source path.sh to set up Kaldi paths
+. ./path.sh || exit 1
+
 #================ EDIT HERE =========================
 
-use_noise=true
-use_music=true
-use_babble=false
+# use_noise=true
+# use_music=true
+# use_babble=true
+# use_reverb=true
+
+# Set to true to export augmented audio files (WAV format)
+# This will save actual audio files instead of just generating them on-the-fly
+export_augmented_audio=false
+export_audio_dir="data/augmented_audio"  # Directory to save exported audio
+export_format="flac"  # Output format: 'wav' or 'flac'
+
+export KALDI_HOME=/mnt/c/Work/Coding/Diarization/kaldi
 
 #====================================================
 
@@ -120,3 +132,96 @@ if $use_music; then combine+=" data/music"; fi
 if $use_babble; then combine+=" data/babble"; fi
 utils/combine_data.sh ${combine}
 cp data/$NAME/reco2dur data/augmented
+
+# Export augmented audio files if requested
+if [ "$export_augmented_audio" = true ]; then
+  echo "${green}Exporting augmented audio files...${reset}"
+  
+  EXPORT_SCRIPT="../../../src/export_augmented_audio_pure_python.py"
+  
+  # Check if export script exists
+  if [ ! -f "$EXPORT_SCRIPT" ]; then
+    echo "${red}Error: export_augmented_audio.py not found at: $EXPORT_SCRIPT${reset}"
+    echo "${red}export_augmented_audio is enabled but export script is missing!${reset}"
+    exit 1
+  fi
+  
+  # Check if KALDI_HOME is set
+  if [ -z "$KALDI_HOME" ]; then
+    echo "${red}Error: KALDI_HOME environment variable is not set!${reset}"
+    echo "${red}Please set KALDI_HOME before running with export_augmented_audio=true${reset}"
+    echo "${yellow}Example: export KALDI_HOME=/mnt/c/Work/Coding/Diarization/kaldi${reset}"
+    exit 1
+  fi
+  
+  # Add Kaldi binaries to PATH (needed for wav-reverberate, flac, sox)
+  export PATH="$KALDI_HOME/src/featbin:$KALDI_HOME/tools/openfst/bin:$PATH"
+  
+  # Check if wav-reverberate is available
+  if ! command -v wav-reverberate &> /dev/null; then
+    echo "${red}Error: wav-reverberate command not found!${reset}"
+    echo "${red}Make sure Kaldi is compiled: cd $KALDI_HOME/src && make${reset}"
+    exit 1
+  fi
+  
+  # Save current directory
+  CURRENT_DIR=$(pwd)
+  
+  # Create export directory
+  mkdir -p $export_audio_dir
+  if [ $? -ne 0 ]; then
+    echo "${red}Error: Failed to create export directory: $export_audio_dir${reset}"
+    cd "$CURRENT_DIR"
+    exit 1
+  fi
+  
+  # Export each augmentation type
+  if $use_reverb && [ -f "data/reverb/wav.scp" ]; then
+    echo "  Exporting reverb audio..."
+    mkdir -p $export_audio_dir/reverb
+    python3 "$EXPORT_SCRIPT" data/reverb/wav.scp $export_audio_dir/reverb --format $export_format
+    if [ $? -ne 0 ]; then
+      echo "${red}Error: Failed to export reverb audio${reset}"
+      cd "$CURRENT_DIR"
+      exit 1
+    fi
+  fi
+  
+  if $use_noise && [ -f "data/noise/wav.scp" ]; then
+    echo "  Exporting noise audio..."
+    mkdir -p $export_audio_dir/noise
+    python3 "$EXPORT_SCRIPT" data/noise/wav.scp $export_audio_dir/noise --format $export_format
+    if [ $? -ne 0 ]; then
+      echo "${red}Error: Failed to export noise audio${reset}"
+      cd "$CURRENT_DIR"
+      exit 1
+    fi
+  fi
+  
+  if $use_music && [ -f "data/music/wav.scp" ]; then
+    echo "  Exporting music audio..."
+    mkdir -p $export_audio_dir/music
+    python3 "$EXPORT_SCRIPT" data/music/wav.scp $export_audio_dir/music --format $export_format
+    if [ $? -ne 0 ]; then
+      echo "${red}Error: Failed to export music audio${reset}"
+      cd "$CURRENT_DIR"
+      exit 1
+    fi
+  fi
+  
+  if $use_babble && [ -f "data/babble/wav.scp" ]; then
+    echo "  Exporting babble audio..."
+    mkdir -p $export_audio_dir/babble
+    python3 "$EXPORT_SCRIPT" data/babble/wav.scp $export_audio_dir/babble --format $export_format
+    if [ $? -ne 0 ]; then
+      echo "${red}Error: Failed to export babble audio${reset}"
+      cd "$CURRENT_DIR"
+      exit 1
+    fi
+  fi
+  
+  # Return to original directory
+  cd "$CURRENT_DIR"
+  
+  echo "${green}✓ Augmented audio files exported to: $export_audio_dir${reset}"
+fi

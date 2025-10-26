@@ -40,7 +40,8 @@ from decimal import Decimal, ROUND_HALF_UP
 #NOTE: edit if needed...
 batch_size_test = 64
 test_dir = 'data/eval_dir/'
-data = 'data/test'
+data = 'data/overlap_100pct_15apt_100' # change this to match your data directory
+results_dir = 'model_evaluation_results/' # directory to save results
 
 def quantize(number, prec):
     """Round to two decimal places"""
@@ -137,6 +138,24 @@ def parse_model_name(model):
     return arch, embed, use_fc, linear, score_type, input_dim
 
 if __name__ == '__main__':
+    # save original working directory
+    orig_dir = os.getcwd()
+    
+    # create results directory in the original working directory
+    results_path = os.path.join(orig_dir, results_dir)
+    os.makedirs(results_path, exist_ok=True)
+    
+    # determine output filename based on data directory
+    data_name = os.path.basename(data.rstrip('/'))
+    results_file = os.path.join(results_path, f'eval_{data_name}.txt')
+    
+    # open results file
+    with open(results_file, 'w') as f:
+        f.write(f"Evaluation Results for: {data}\n")
+        f.write(f"{'='*60}\n\n")
+    
+    print(f"Saving results to: {results_file}")
+    
     # move to the evaluation directory
     os.chdir(test_dir)
 
@@ -216,19 +235,28 @@ if __name__ == '__main__':
         out_AP = average_precision_score(targets_oh, outputs, average=None)
         mAP = average_precision_score(targets_oh, outputs, average='micro')
 
-        print('\n', model)
-        print(out_AP) 
-        print(f"mAP: {mAP}")
+        # prepare output string
+        result_str = f'\n{model}\n'
+        result_str += f'{out_AP}\n'
+        result_str += f"mAP: {mAP}\n"
 
         # compute the confusion matrix
         classes = np.argmax(outputs, axis=1)
         cm = confusion_matrix(classes, targets, normalize='pred')
 
-        print("confusion")
-        print(cm)
+        result_str += "confusion\n"
+        result_str += f"{cm}\n"
 
         # compute the accuracy score
         acc = accuracy_score(classes, targets) * 100
-        print(f"accuracy {quantize(acc, 2)}")
+        result_str += f"accuracy {quantize(acc, 2)}\n"
+        result_str += f"\n{'='*60}\n"
 
-        print("\n=======================================\n")
+        # print to console
+        print(result_str)
+
+        # append to results file
+        with open(results_file, 'a') as f:
+            f.write(result_str)
+    
+    print(f"\n✅ All results saved to: {results_file}")

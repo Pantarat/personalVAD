@@ -39,32 +39,31 @@ fi
 
 # move to the eval directory..
 BASE=$PWD
-TRAIN_NAME=test
-TEST_NAME=test
+TRAIN_NAME=features_demo
+TEST_NAME=features_demo
 cd data/eval_dir
 
 if [[ $arch == "vad" ]]; then
   echo "${green}Beginning training the classic vad architecture.${reset}"
-  python $BASE/src/vad.py --train_dir data/$TRAIN_NAME --test_dir data/$TEST_NAME \
-    --nsave_model
+  python $BASE/src/vad.py --train_dir data/$TRAIN_NAME --test_dir data/$TEST_NAME
 fi
 
 if [[ $arch == "et" ]]; then
   echo "${green}Beginning training the ET vad architecture.${reset}"
-  python $BASE/src/vad_et.py --nsave_model --embed_path embeddings \
+  python $BASE/src/vad_et.py --embed_path embeddings \
     --train_dir data/$TRAIN_NAME --test_dir data/$TEST_NAME
 fi
 
 if [[ $arch == "st" ]]; then
   echo "${green}Beginning training the ST vad architecture.${reset}"
   echo "${yellow}Using scoring method" $st_score_type "${reset}"
-  python $BASE/src/vad_st.py --nsave_model --score_type $st_score_type \
+  python $BASE/src/vad_st.py --score_type $st_score_type \
     --train_dir data/$TRAIN_NAME --test_dir data/$TEST_NAME
 fi
 
 if [[ $arch == "set" ]]; then
   echo "${green}Beginning training the SET vad architecture.${reset}"
   echo "${yellow}Using scoring method" $set_score_type "${reset}"
-  python $BASE/src/vad_set.py --nsave_model --embed_path embeddings --score_type $set_score_type \
+  python $BASE/src/vad_set.py --embed_path embeddings --score_type $set_score_type \
     --train_dir data/$TRAIN_NAME --test_dir data/$TEST_NAME
 fi

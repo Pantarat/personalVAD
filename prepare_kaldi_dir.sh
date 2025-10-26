@@ -17,19 +17,63 @@
 #
 
 
-# first, check if the kaldi folder exists..
-if [[ ! -d "kaldi/" ]]; then
-  echo "the 'kaldi/' folder does not exist."
-  echo "Please download and install kaldi to the project root directory."
+# Allow using an external Kaldi installation via KALDI_HOME env var.
+# If not set, fall back to local ./kaldi
+
+set -e
+
+REPO_ROOT=$(pwd)
+if [[ -n "${KALDI_HOME}" ]]; then
+  KALDI_PATH="${KALDI_HOME}"
+else
+  KALDI_PATH="$REPO_ROOT/kaldi"
+fi
+
+if [[ ! -d "$KALDI_PATH" ]]; then
+  echo "Kaldi root not found at $KALDI_PATH"
+  echo "Set KALDI_HOME to your Kaldi path (e.g., /mnt/c/Work/Coding/Diarization/kaldi) or clone Kaldi into $REPO_ROOT/kaldi"
   exit 1
 fi
 
-cd kaldi/egs
+echo "Using Kaldi at: $KALDI_PATH"
 
-cp -r ../../src/kaldi/egs/pvad .
+mkdir -p "$KALDI_PATH/egs"
+cd "$KALDI_PATH/egs"
+
+# Copy the pvad recipe directory into Kaldi egs if not already present
+if [[ ! -d pvad ]]; then
+  # The pvad recipe folder content is stored in repo src/kaldi/egs/pvad
+  if [[ -d "$REPO_ROOT/src/kaldi/egs/pvad" ]]; then
+    cp -r "$REPO_ROOT/src/kaldi/egs/pvad" .
+  else
+    echo "Source pvad recipe not found at $REPO_ROOT/src/kaldi/egs/pvad"
+    exit 1
+  fi
+fi
 
 cd pvad
-# create symlinks for kaldi binaries and utilities
-ln -s ../wsj/s5/steps .
-ln -s ../wsj/s5/utils .
-ln -s ../../src .
+
+# create symlinks for kaldi binaries and utilities from wsj s5
+if [[ ! -d steps ]]; then
+  if [[ -d ../wsj/s5/steps ]]; then
+    ln -s ../wsj/s5/steps steps
+  else
+    echo "Cannot find ../wsj/s5/steps. Ensure wsj s5 exists inside your Kaldi egs."
+    exit 1
+  fi
+fi
+if [[ ! -d utils ]]; then
+  if [[ -d ../wsj/s5/utils ]]; then
+    ln -s ../wsj/s5/utils utils
+  else
+    echo "Cannot find ../wsj/s5/utils. Ensure wsj s5 exists inside your Kaldi egs."
+    exit 1
+  fi
+fi
+
+# link the pvad repo src for helper scripts
+if [[ ! -L src ]]; then
+  ln -s "$REPO_ROOT/src" src
+fi
+
+echo "Kaldi pvad directory prepared at: $KALDI_PATH/egs/pvad"

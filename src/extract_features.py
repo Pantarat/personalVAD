@@ -173,7 +173,28 @@ def extract_features(scp, q_send, q_return):
     target_writer = open(f'{DEST}/targets_{pid}.scp', 'w')
     embed_scp = kaldiio.load_scp(f'{EMBED}/dvectors.scp')
 
-    for utt_id, (sr, arr) in wav_scp:
+    # iterate robustly over the ReadHelper generator: some entries may fail
+    # (e.g. unreadable/missing files). Use next() and catch exceptions so a
+    # single bad entry doesn't kill the whole worker/pool.
+    wav_iter = iter(wav_scp)
+    utter_count = 0
+    while True:
+        try:
+            item = next(wav_iter)
+        except StopIteration:
+            break
+        except Exception as e:
+            # kaldiio may raise AssertionError or decoder errors while trying
+            # to read/parse a malformed scp entry or an unreadable audio file.
+            print(f"Warning: failed to read an entry from {scp}: {type(e).__name__}: {e}. Skipping entry.")
+            # continue to next entry
+            continue
+
+        try:
+            utt_id, (sr, arr) = item
+        except Exception as e:
+            print(f"Warning: unexpected item format from {scp}: {type(e).__name__}: {e}. Skipping item: {item}")
+            continue
 
         # now load the transcription and the alignment timestamps
         try:
@@ -189,7 +210,7 @@ def extract_features(scp, q_send, q_return):
         arr = arr.astype(np.float32, order='C') / 32768
 
         # extract the filterbank features
-        fbanks = librosa.feature.melspectrogram(arr, 16000, n_fft=400,
+        fbanks = librosa.feature.melspectrogram(y=arr, sr=16000, n_fft=400,
                 hop_length=160, n_mels=40).astype('float32').T[:-2]
         logfbanks = np.log10(fbanks + 1e-6)
 
@@ -201,7 +222,7 @@ def extract_features(scp, q_send, q_return):
         max_wave_length = wav_slices[-1].stop
         if max_wave_length >= wav.size:
             wav = np.pad(arr, (0, max_wave_length - wav.size), "constant")
-        mels = librosa.feature.melspectrogram(wav, 16000, n_fft=400,
+        mels = librosa.feature.melspectrogram(y=wav, sr=16000, n_fft=400,
                 hop_length=160, n_mels=40).astype('float32').T
 
         # create the fbanks slices...
@@ -329,15 +350,24 @@ def extract_features(scp, q_send, q_return):
         label_writer(utt_id, labels)
         target_writer.write(f"{utt_id} {spk_id}\n") # write the target speaker too..
 
-        # flush the results... just to be sure really...
-        if i % 100 == 0:
-            array_writer.fark.flush()
-            array_writer.fscp.flush()
-            score_writer.fark.flush()
-            score_writer.fscp.flush()
-            label_writer.fark.flush()
-            label_writer.fscp.flush()
-            target_writer.flush()
+        # flush the results every 100 utterances to avoid excessive buffering.
+        utter_count += 1
+        if utter_count % 100 == 0:
+            try:
+                # WriteHelper returns callables; underlying file handles are
+                # accessible via attributes, but guard against missing attrs.
+                if hasattr(array_writer, 'fark') and hasattr(array_writer, 'fscp'):
+                    array_writer.fark.flush()
+                    array_writer.fscp.flush()
+                if hasattr(score_writer, 'fark') and hasattr(score_writer, 'fscp'):
+                    score_writer.fark.flush()
+                    score_writer.fscp.flush()
+                if hasattr(label_writer, 'fark') and hasattr(label_writer, 'fscp'):
+                    label_writer.fark.flush()
+                    label_writer.fscp.flush()
+                target_writer.flush()
+            except Exception as e:
+                print(f"Warning: failed to flush writers: {type(e).__name__}: {e}")
 
     # close all the scps..
     wav_scp.close()

@@ -84,8 +84,8 @@ class VadETDatasetX(Dataset):
         # add the dvector array to the feature vector
         x = np.hstack((x, np.full((x.shape[0], 512), embed)))
 
-        x = torch.from_numpy(x).float()
-        y = torch.from_numpy(y).long()
+        x = torch.from_numpy(x.copy()).float()
+        y = torch.from_numpy(y.copy()).long()
         return x, y
 
 

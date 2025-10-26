@@ -78,8 +78,8 @@ class VadSTDataset(Dataset):
         # add the speaker verification scores array to the feature vector
         x = np.hstack((x, np.expand_dims(scores, 1)))
 
-        x = torch.from_numpy(x).float()
-        y = torch.from_numpy(y).long()
+        x = torch.from_numpy(x.copy()).float()
+        y = torch.from_numpy(y.copy()).long()
         return x, y
 
 
