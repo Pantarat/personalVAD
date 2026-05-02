@@ -39,8 +39,8 @@ from decimal import Decimal, ROUND_HALF_UP
 
 #NOTE: edit if needed...
 batch_size_test = 64
-test_dir = 'data/eval_dir/'
-data = 'data/overlap_100pct_15apt_100' # change this to match your data directory
+test_dir = 'vad_set_overlap_trained/'
+data = 'data/84_ov_test_ov50pct_main84_aug_100' # change this to match your data directory
 results_dir = 'model_evaluation_results/' # directory to save results
 
 def quantize(number, prec):
@@ -76,7 +76,11 @@ def parse_model_name(model):
         embed = 'dvec'
 
     # determine the architecture and the input layer dimension
-    if 'set' in model:
+    if 'ae' in model:
+        arch = 'set_ae'
+        input_dim = 105
+        
+    elif 'set' in model:
         arch = 'set'
         input_dim = 297
 
@@ -105,9 +109,9 @@ def parse_model_name(model):
         elif 'score1' in model: score_type = 1
         elif 'score2' in model: score_type = 2
         else:
-            # unknown architecture..
-            print(model, "other architecture...")
-            return None
+            # score type not specified, default to score1
+            score_type = 1
+            print(f"  ℹ️  Score type not specified, defaulting to score_type=1")
 
     # determine activation
     if embed == 'dvec':
@@ -141,32 +145,54 @@ if __name__ == '__main__':
     # save original working directory
     orig_dir = os.getcwd()
     
-    # create results directory in the original working directory
+    # convert all relative paths to absolute paths based on execution directory
+    data_path = os.path.join(orig_dir, data)
+    test_dir_path = os.path.join(orig_dir, test_dir)
     results_path = os.path.join(orig_dir, results_dir)
+    embeddings_base = os.path.join(orig_dir, 'data')
+    
+    # create results directory in the original working directory
     os.makedirs(results_path, exist_ok=True)
     
     # determine output filename based on data directory
     data_name = os.path.basename(data.rstrip('/'))
     results_file = os.path.join(results_path, f'eval_{data_name}.txt')
-    
+    # results_file = os.path.join(results_path, f'test.txt')
+   
     # open results file
     with open(results_file, 'w') as f:
-        f.write(f"Evaluation Results for: {data}\n")
+        f.write(f"Evaluation Results for: {data_path}\n")
         f.write(f"{'='*60}\n\n")
     
     print(f"Saving results to: {results_file}")
     
-    # move to the evaluation directory
-    os.chdir(test_dir)
-
-    # get the model list
-    models = glob('models/*pt')
+    # get the model list (relative to test_dir)
+    # models = glob('models/*pt')
+    models = [
+        "../data/eval_dir/models/vad_set_tanh_score1_10ep.pt",
+        "vad_set_main84_25pcttrain_tanh_score1_500.pt",
+        "vad_set_main84_50pcttrain_tanh_score1_500.pt",
+        "vad_set_main84_75pcttrain_tanh_score1_500.pt",
+        "vad_set_main84_100pcttrain_tanh_score1_500.pt",
+    ]
+    
+    # convert model paths to absolute paths
+    models = [os.path.join(test_dir_path, model) for model in models]
 
     # evaluate the models one by one...
     for model in models:
+        # check if model file exists
+        if not os.path.exists(model):
+            print(f"⚠️  Model not found: {model}")
+            continue
+            
+        print(f"\n🔍 Evaluating: {model}")
+        
         # get the model information
         ret = parse_model_name(model)
-        if ret == None: continue
+        if ret == None: 
+            print(f"⚠️  Could not parse model name: {model}")
+            continue
         (arch, embed, use_fc, linear, score_type, input_dim) = ret
 
         # load the model
@@ -177,21 +203,21 @@ if __name__ == '__main__':
         # create the corresponding dataset objects
         if arch == 'et':
             if embed == 'dvec':
-                test_data = VadETDataset(data, 'embeddings')
+                test_data = VadETDataset(data_path, os.path.join(embeddings_base, 'embeddings'))
             elif embed == 'xvec':
-                test_data = VadETDatasetX(data, 'embeddings_xvec_l2')
+                test_data = VadETDatasetX(data_path, os.path.join(embeddings_base, 'embeddings_xvec_l2'))
 
             else: # ivec
                 if 'l2' in model:
-                    test_data = VadETDatasetI(data, 'embeddings_ivec_l2')
+                    test_data = VadETDatasetI(data_path, os.path.join(embeddings_base, 'embeddings_ivec_l2'))
                 else:
-                    test_data = VadETDatasetI(data, 'embeddings_ivec')
+                    test_data = VadETDatasetI(data_path, os.path.join(embeddings_base, 'embeddings_ivec'))
 
         elif arch == 'set':
-            test_data = VadSETDataset(data, 'embeddings', score_type)
+            test_data = VadSETDataset(data_path, os.path.join(embeddings_base, 'embeddings'), score_type)
 
         elif arch == 'st':
-            test_data = VadSTDataset(data, score_type)
+            test_data = VadSTDataset(data_path, score_type)
             
         else:
             # we should not get here

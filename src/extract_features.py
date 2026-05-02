@@ -178,6 +178,7 @@ def extract_features(scp, q_send, q_return):
     # single bad entry doesn't kill the whole worker/pool.
     wav_iter = iter(wav_scp)
     utter_count = 0
+    processed_count = 0  # Track successfully processed utterances
     while True:
         try:
             item = next(wav_iter)
@@ -204,7 +205,22 @@ def extract_features(scp, q_send, q_return):
             continue
 
         gt_len = len(gtruth)
-        assert (gt_len == tstamps.size), f"gtruth and tstamps arrays have to be the same"
+        # New format: N labels correspond to N+1 timestamps (segment boundaries)
+        # Each label describes the segment from timestamp[i] to timestamp[i+1]
+        # Old format: labels and timestamps were paired (equal length)
+        # Accept both formats for backward compatibility
+        if gt_len == tstamps.size - 1:
+            # New format: N labels, N+1 timestamps
+            format_type = "new"
+        elif gt_len == tstamps.size:
+            # Old format: N labels, N timestamps (legacy support)
+            format_type = "old"
+        else:
+            print(f"Error for {utt_id}: gtruth has {gt_len} labels but tstamps has {tstamps.size} timestamps")
+            print(f"  Expected: {gt_len} labels with either {gt_len} or {gt_len+1} timestamps")
+            print(f"  Labels: {gtruth[:5]}... (showing first 5)")
+            print(f"  Timestamps (ms): {tstamps[:5]}... (showing first 5)")
+            continue
 
         # load the wav and normalize to float32
         arr = arr.astype(np.float32, order='C') / 32768
@@ -232,9 +248,9 @@ def extract_features(scp, q_send, q_return):
         # where n is the number of feature frames we extracted
         n = logfbanks.shape[0]
 
-        # NOTE: the timestamp doesn't really match the value of n. Keep an eye out..
-        if tstamps[-1] < n*10:
-            tstamps[-1] = n * 10
+        # DO NOT extend timestamps to match augmented audio length
+        # The original timestamps represent actual speech boundaries
+        # Any audio beyond this (e.g., reverb tail) should be labeled as non-speech
 
         # we need to extract partial embeddings for each utterance - each representing
         # a certain time window. Then those embeddings are compared with the target
@@ -323,23 +339,114 @@ def extract_features(scp, q_send, q_return):
             continue
 
         # now relabel the ground truths to three classes... (ns, ntss, tss) -> {0, 1, 2}
-        labels = np.ones(n, dtype=np.float32)
-        stamp_prev = 0
+        # Initialize all labels as non-speech (0) - this handles augmentation tails correctly
+        labels = np.zeros(n, dtype=np.float32)
         tstamps = tstamps // 10
-
-        for (stamp, label) in zip(tstamps, gtruth):
-            if label == '':
-                labels[stamp_prev:stamp] = 0
-            elif label == '$':
-                which -= 1; # decrement the target speaker indicator
-                labels[stamp_prev:stamp] = 0
-            else:
-                if which == 0: # tss
+        
+        # Get the original audio end time from the last timestamp
+        original_end_frame = tstamps[-1]
+        
+        # Check format: new format has N labels + N+1 timestamps
+        # Old format has N labels + N timestamps (paired)
+        
+        # DEBUG: Show format check for first 3 utterances
+        if processed_count < 3:
+            print(f"\n=== FORMAT CHECK [{processed_count}] {utt_id} ===", flush=True)
+            print(f"len(gtruth) = {len(gtruth)}", flush=True)
+            print(f"len(tstamps) = {len(tstamps)}", flush=True)
+            print(f"len(tstamps) - 1 = {len(tstamps) - 1}", flush=True)
+            print(f"Condition (len(gtruth) == len(tstamps) - 1): {len(gtruth) == len(tstamps) - 1}", flush=True)
+        
+        if len(gtruth) == len(tstamps) - 1:
+            # DEBUG: Check first 3 utterances
+            if processed_count < 3:
+                print(f"\n=== DEBUG [{processed_count}] {utt_id} - USING NEW FORMAT ===", flush=True)
+                print(f"gtruth length: {len(gtruth)}, tstamps length: {len(tstamps)}", flush=True)
+                print(f"First 5 labels: {gtruth[:5]}", flush=True)
+                print(f"Label types: {[type(l).__name__ for l in gtruth[:5]]}", flush=True)
+                print(f"Label repr: {[repr(l) for l in gtruth[:5]]}", flush=True)
+                print(f"First 6 timestamps (10ms): {tstamps[:6]}", flush=True)
+                print(f"n (frames): {n}", flush=True)
+            
+            # New format: each label describes segment from tstamps[i] to tstamps[i+1]
+            for i, label in enumerate(gtruth):
+                stamp_start = min(tstamps[i], n)
+                stamp_end = min(tstamps[i + 1], n)
+                
+                # Handle different label types:
+                # '' = silence/non-speech (NS) -> 0
+                # 'T' = target speaker speech (TSS) -> 2
+                # 'N' = non-target speaker speech (NTSS) -> 1
+                # '$' = speaker change marker (treat as silence) -> 0
+                
+                # DEBUG: Check first label of first 3 utterances
+                if processed_count < 3 and i == 0:
+                    print(f"First label: repr={repr(label)}, type={type(label).__name__}", flush=True)
+                    print(f"  label == '': {label == ''}", flush=True)
+                    print(f"  bool(label): {bool(label)}", flush=True)
+                    print(f"  len(label): {len(label)}", flush=True)
+                    print(f"  stamp_start={stamp_start}, stamp_end={stamp_end}", flush=True)
+                
+                if label == '' or label == '$':
+                    # Silence or speaker change
+                    labels[stamp_start:stamp_end] = 0
+                    if processed_count < 3 and i == 0:
+                        print(f"  -> Set labels[{stamp_start}:{stamp_end}] = 0 (SILENCE)", flush=True)
+                elif label == 'T':
+                    # Explicit TSS marker (from overlap generator)
+                    labels[stamp_start:stamp_end] = 2
+                    if processed_count < 3 and i == 0:
+                        print(f"  -> Set labels[{stamp_start}:{stamp_end}] = 2 (TARGET)", flush=True)
+                elif label == 'N':
+                    # Explicit NTSS marker (from overlap generator)
+                    labels[stamp_start:stamp_end] = 1
+                    if processed_count < 3 and i == 0:
+                        print(f"  -> Set labels[{stamp_start}:{stamp_end}] = 1 (NTSS)", flush=True)
+                else:
+                    # Should not happen with new format, but handle as silence
+                    labels[stamp_start:stamp_end] = 0
+                    if processed_count < 3 and i == 0:
+                        print(f"  -> ELSE: Set labels[{stamp_start}:{stamp_end}] = 0 (SILENCE)", flush=True)
+        else:
+            # Old/legacy format: timestamps and labels are paired
+            if processed_count < 3:
+                print(f"\n=== DEBUG [{processed_count}] {utt_id} - USING LEGACY FORMAT ===", flush=True)
+                print(f"gtruth length: {len(gtruth)}, tstamps length: {len(tstamps)}", flush=True)
+            stamp_prev = 0
+            for (stamp, label) in zip(tstamps, gtruth):
+                # Clip stamp to not exceed actual audio length
+                stamp = min(stamp, n)
+                
+                # Handle different label types:
+                # '' = silence/non-speech (NS) -> 0
+                # 'T' = target speaker speech (TSS) -> 2
+                # 'N' = non-target speaker speech (NTSS) -> 1
+                # '$' = speaker change marker (treat as silence) -> 0
+                # (legacy: word text = depends on which speaker)
+                
+                if label == '' or label == '$':
+                    # Silence or speaker change
+                    labels[stamp_prev:stamp] = 0
+                    if label == '$':
+                        which -= 1  # decrement the target speaker indicator (legacy)
+                elif label == 'T':
+                    # Explicit TSS marker (from overlap generator)
                     labels[stamp_prev:stamp] = 2
-                #else: # ntss - no need to label, the array is already filled with ones
-                    #labels[stamp_prev:stamp] = 1
+                elif label == 'N':
+                    # Explicit NTSS marker (from overlap generator)
+                    labels[stamp_prev:stamp] = 1
+                else:
+                    # Legacy word-level labels (from original dataset)
+                    # Determine label based on which speaker
+                    if which == 0:  # tss
+                        labels[stamp_prev:stamp] = 2
+                    else:  # ntss
+                        labels[stamp_prev:stamp] = 1
 
-            stamp_prev = stamp
+                stamp_prev = stamp
+        
+        # Any frames beyond the original speech (e.g., reverb tail) remain as non-speech (0)
+        # This is important for augmented audio where reverb extends the audio length
 
         # now create one more label array for the base VAD system
         labels_vad = (labels != 0).astype('float32')
@@ -349,6 +456,9 @@ def extract_features(scp, q_send, q_return):
         score_writer(utt_id, scores)
         label_writer(utt_id, labels)
         target_writer.write(f"{utt_id} {spk_id}\n") # write the target speaker too..
+
+        # Increment processed count AFTER successful processing
+        processed_count += 1
 
         # flush the results every 100 utterances to avoid excessive buffering.
         utter_count += 1

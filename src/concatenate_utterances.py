@@ -52,11 +52,11 @@ def parse_alignments(path):
     """
 
     transcripts = [] 
-    directory = path.rpartition('/')[0] + '/'
+    directory = os.path.dirname(path)
     with open(path) as f:
         for line in f.readlines():
             name = line.split(' ')[0]
-            full_path = directory + name + '.flac'
+            full_path = os.path.join(directory, name + '.flac')
             aligned_text = line.split(' ')[1][1:-1]
             tstamps = line.split(' ')[2][1:-2] # without the newline..
 

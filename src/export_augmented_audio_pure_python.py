@@ -228,19 +228,41 @@ def parse_kaldi_command(command, base_dir):
     
     else:
         # This is an additive noise command
+        # Try different quote styles (single quotes or escaped quotes)
         additive_match = re.search(r"--additive-signals='([^']+)'", command)
         if not additive_match:
-            raise ValueError("Could not find additive signals in command")
+            # Try with double quotes
+            additive_match = re.search(r'--additive-signals="([^"]+)"', command)
+        if not additive_match:
+            # Try without quotes (sometimes Kaldi doesn't quote short parameters)
+            additive_match = re.search(r'--additive-signals=(\S+)', command)
+        
+        if not additive_match:
+            raise ValueError(f"Could not find additive signals in command: {command[:100]}...")
+        
         additive_str = additive_match.group(1)
         
         signals = parse_additive_signals(additive_str)
+        if not signals:
+            raise ValueError(f"Could not parse additive signals from: {additive_str[:100]}...")
+        
         noise_files = [file_path for _, file_path in signals]
         
-        # Extract SNRs
+        # Extract SNRs with multiple quote style support
         snr_match = re.search(r"--snrs='([^']+)'", command)
         if not snr_match:
-            raise ValueError("Could not find SNRs in command")
-        snrs = [float(x) for x in snr_match.group(1).split(',')]
+            snr_match = re.search(r'--snrs="([^"]+)"', command)
+        if not snr_match:
+            snr_match = re.search(r'--snrs=(\S+)', command)
+        
+        if not snr_match:
+            raise ValueError(f"Could not find SNRs in command: {command[:100]}...")
+        
+        snrs_str = snr_match.group(1)
+        try:
+            snrs = [float(x.strip()) for x in snrs_str.split(',') if x.strip()]
+        except ValueError as e:
+            raise ValueError(f"Could not parse SNRs from '{snrs_str}': {e}")
         
         # Convert to absolute paths
         clean_file = Path(base_dir) / clean_file

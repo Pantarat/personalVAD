@@ -26,11 +26,12 @@ import numpy as np
 import os
 
 from personal_vad import PersonalVAD, WPL, pad_collate
+from dataset_utils import sample_evenly_across_augmentations
 
 # model hyper parameters
-num_epochs = 10
+num_epochs = 200
 batch_size = 64
-batch_size_test = 64
+batch_size_test = 32
 
 input_dim = 297
 hidden_dim = 64
@@ -39,13 +40,18 @@ num_layers = 2
 lr = 1e-3
 SCHEDULER = True
 
+# Early stopping and checkpointing
+EARLY_STOPPING_PATIENCE = 5  # Stop if no improvement for N epochs
+SAVE_EVERY_N_EPOCHS = 1  # Save checkpoint every N epochs
+METRIC_FOR_BEST = 'mAP'  # 'mAP' or 'accuracy'
+
 DATA_TRAIN = 'data/train'
 DATA_TEST = 'data/test'
 EMBED_PATH = 'embeddings'
-MODEL_PATH = 'vad_set.pt'
+MODEL_PATH = 'vad_set_main84_50pcttrain_tanh_score1_500.pt'
 SAVE_MODEL = True
 
-USE_WPL = False
+USE_WPL = True
 NUM_WORKERS = 2
 
 # Selects which of the scoring methods should be used...
@@ -58,7 +64,7 @@ WPL_WEIGHTS = torch.tensor([1.0, 0.1, 1.0]).to(device)
 class VadSETDataset(Dataset):
     """VadSET dataset class. Uses kaldi scp and ark files."""
 
-    def __init__(self, root_dir, embed_path, score_type):
+    def __init__(self, root_dir, embed_path, score_type, max_utterances=None):
         self.root_dir = root_dir
         self.embed_path = embed_path
         self.score_type = score_type
@@ -68,6 +74,11 @@ class VadSETDataset(Dataset):
         self.scores = kaldiio.load_scp(f'{self.root_dir}/scores.scp')
         self.labels = kaldiio.load_scp(f'{self.root_dir}/labels.scp')
         self.keys = np.array(list(self.fbanks)) # get all the keys
+        
+        # Limit number of utterances if specified
+        if max_utterances is not None and max_utterances > 0:
+            self.keys = sample_evenly_across_augmentations(self.keys, max_utterances)
+        
         self.embed = kaldiio.load_scp(f'{self.embed_path}/dvectors.scp')
 
         # load the target speaker ids
@@ -109,6 +120,10 @@ if __name__ == '__main__':
     parser.add_argument('--embed_path', type=str, default=EMBED_PATH)
     parser.add_argument('--score_type', type=int, default=SCORE_TYPE)
     parser.add_argument('--model_path', type=str, default=MODEL_PATH)
+    parser.add_argument('--max_train_utterances', type=int, default=None,
+                        help='Maximum number of training utterances to use (default: use all)')
+    parser.add_argument('--max_test_utterances', type=int, default=None,
+                        help='Maximum number of test utterances to use (default: use all)')
     parser.add_argument('--use_kaldi', action='store_true')
     parser.add_argument('--use_wpl', action='store_true')
     parser.add_argument('--nuse_fc', action='store_false')
@@ -130,8 +145,11 @@ if __name__ == '__main__':
         sys.exit(1)
 
     # Load the data and create DataLoader instances
-    train_data = VadSETDataset(DATA_TRAIN, EMBED_PATH, SCORE_TYPE)
-    test_data = VadSETDataset(DATA_TEST, EMBED_PATH, SCORE_TYPE)
+    train_data = VadSETDataset(DATA_TRAIN, EMBED_PATH, SCORE_TYPE, max_utterances=args.max_train_utterances)
+    test_data = VadSETDataset(DATA_TEST, EMBED_PATH, SCORE_TYPE, max_utterances=args.max_test_utterances)
+    
+    print(f"Training utterances: {len(train_data)}")
+    print(f"Test utterances: {len(test_data)}")
 
     train_loader = DataLoader(
             dataset=train_data, num_workers=NUM_WORKERS, pin_memory=True,
@@ -151,8 +169,24 @@ if __name__ == '__main__':
         scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.1)
 
     softmax = nn.Softmax(dim=1)
+    
+    # Early stopping tracking
+    best_metric = 0.0  # Best validation metric (mAP or accuracy)
+    epochs_without_improvement = 0
+    best_epoch = 0
+    
+    # Create checkpoint directory
+    checkpoint_dir = MODEL_PATH.rpartition('.')[0] + '_checkpoints'
+    if SAVE_MODEL and not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir)
 
     # Train!!! hype!!!
+    print("\n" + "=" * 80)
+    print("TRAINING")
+    print("=" * 80)
+    print(f"Early stopping: enabled (patience={EARLY_STOPPING_PATIENCE}, metric={METRIC_FOR_BEST})")
+    print(f"Periodic saving: every {SAVE_EVERY_N_EPOCHS} epoch(s)")
+    
     for epoch in range(num_epochs):
         print(f"====== Starting epoch {epoch} ======")
         for batch, (x_padded, y_padded, x_lens, y_lens) in enumerate(train_loader):
@@ -217,14 +251,51 @@ if __name__ == '__main__':
 
             print(out_AP)
             print(f"mAP: {mAP}")
-
-        # Save the model - after each epoch for ensurance...
-        if SAVE_MODEL:
-
-            # if necessary, create the destination path for the model...
-            path_seg = MODEL_PATH.split('/')[:-1]
-            if path_seg != []:
-                if not os.path.exists(MODEL_PATH.rpartition('/')[0]):
-                    os.makedirs('/'.join(path_seg))
-            torch.save(model.state_dict(), MODEL_PATH)
+            
+            # Early stopping and checkpointing
+            current_metric = mAP if METRIC_FOR_BEST == 'mAP' else acc / 100.0
+            
+            if current_metric > best_metric:
+                best_metric = current_metric
+                best_epoch = epoch
+                epochs_without_improvement = 0
+                
+                # Save best model
+                if SAVE_MODEL:
+                    path_seg = MODEL_PATH.split('/')[:-1]
+                    if path_seg != []:
+                        if not os.path.exists(MODEL_PATH.rpartition('/')[0]):
+                            os.makedirs('/'.join(path_seg))
+                    torch.save(model.state_dict(), MODEL_PATH)
+                    print(f"✓ New best {METRIC_FOR_BEST}: {best_metric:.4f} - Model saved")
+            else:
+                epochs_without_improvement += 1
+                print(f"No improvement for {epochs_without_improvement} epoch(s) (best {METRIC_FOR_BEST}: {best_metric:.4f} at epoch {best_epoch})")
+                
+                if epochs_without_improvement >= EARLY_STOPPING_PATIENCE:
+                    print(f"\n⚠️  Early stopping triggered after {epoch + 1} epochs")
+                    print(f"Best {METRIC_FOR_BEST}: {best_metric:.4f} (epoch {best_epoch})")
+                    break
+            
+            # Periodic checkpoint saving
+            if SAVE_MODEL and (epoch + 1) % SAVE_EVERY_N_EPOCHS == 0:
+                checkpoint_path = os.path.join(checkpoint_dir, f'checkpoint_epoch_{epoch + 1}.pt')
+                torch.save({
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'best_metric': best_metric,
+                    'metric_type': METRIC_FOR_BEST,
+                    'accuracy': acc,
+                    'mAP': mAP
+                }, checkpoint_path)
+                print(f"📁 Checkpoint saved: {checkpoint_path}")
+    
+    print("\n" + "=" * 80)
+    print("✅ TRAINING COMPLETE")
+    print("=" * 80)
+    print(f"\n💾 Best model saved to: {MODEL_PATH}")
+    print(f"📊 Best {METRIC_FOR_BEST}: {best_metric:.4f} (epoch {best_epoch})")
+    if SAVE_MODEL:
+        print(f"📁 Checkpoints saved to: {checkpoint_dir}")
 

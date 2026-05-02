@@ -99,15 +99,34 @@ def parse_results(input_file, output_file):
 
 if __name__ == '__main__':
     import sys
+    import os
+    from pathlib import Path
 
-    if len(sys.argv) == 3:
+    if len(sys.argv) >= 2:
+        # Single file mode
         input_file = sys.argv[1]
-        output_file = sys.argv[2]
-    elif len(sys.argv) == 2:
-        input_file = sys.argv[1]
-        output_file = input_file.replace('.txt', '.csv')
+        output_file = sys.argv[2] if len(sys.argv) == 3 else input_file.replace('.txt', '.csv')
+        parse_results(input_file, output_file)
     else:
-        input_file = 'eval_overlap_0pct_100.txt'
-        output_file = 'eval_overlap_0pct_100.csv'
-
-    parse_results(input_file, output_file)
+        # Batch mode: process all eval_*.txt files in current directory
+        script_dir = Path(__file__).parent
+        txt_files = list(script_dir.glob('eval_*.txt'))
+        
+        # Filter out files that already have a .csv companion
+        files_to_process = []
+        for txt_file in txt_files:
+            csv_file = txt_file.with_suffix('.csv')
+            # Skip if it's already a CSV or if CSV exists and is newer
+            if not csv_file.exists() or txt_file.stat().st_mtime > csv_file.stat().st_mtime:
+                files_to_process.append(txt_file)
+        
+        if not files_to_process:
+            print("No eval_*.txt files found or all are already up-to-date")
+        else:
+            print(f"Found {len(files_to_process)} file(s) to process:\n")
+            for txt_file in files_to_process:
+                input_file = str(txt_file)
+                output_file = str(txt_file.with_suffix('.csv'))
+                print(f"Processing: {txt_file.name}")
+                parse_results(input_file, output_file)
+                print()
