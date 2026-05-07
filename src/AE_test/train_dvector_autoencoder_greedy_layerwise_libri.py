@@ -25,10 +25,13 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
+from torchsummary import summary
 
 from resemblyzer import VoiceEncoder
 
 from train_dvector_autoencoder_deep_stacked_libri import (
+    _checkpoint_dir_for_config,
+    _extract_with_cache,
     discover_librispeech_audio_files,
     discover_musan_speech_noise_files,
     extract_noisy_clean_dvector_pairs_from_libri,
@@ -56,14 +59,17 @@ MAX_CHUNKS_PER_UTTERANCE = 5
 
 MUSAN_SPEECH_NOISE_ROOT = "../../kaldi/egs/pvad/musan/musan_speech_train"
 MUSAN_BABBLE_SNR_RANGE_DB = (20.0, 17.0, 15.0, 13.0)
-INCLUDE_NOISE_ONLY_SILENCE_TARGET_PAIRS = True
+INCLUDE_NOISE_ONLY_SILENCE_TARGET_PAIRS = True  # If True, includes extra pairs where noise is mixed with silence and target is the clean silence d-vector (instead of zero vector)
+INCLUDE_CLEAN_IDENTITY_PAIRS = False  # If True, add clean->clean identity pairs to training data
 
-MODEL_SAVE_DIR = "test_outputs/models/dvector_ae_greedy_layerwise_2-5-26"
+MODEL_SAVE_DIR = "test_outputs/models/greedy/dvector_ae_greedy_layerwise_15_6-5-26"
 
 # Greedy layer-wise architecture (one hidden layer per stage)
-GREEDY_LAYER_HIDDEN_DIMS = [192, 128]
+GREEDY_LAYER_HIDDEN_DIMS = [192, 192]
 DROPOUT_RATE = 0.1
-NORM_TYPE = "batchnorm"
+NORM_TYPE = "layernorm"
+ACTIVATION_TYPE = "tanh"  # tanh or relu
+OUTPUT_NORMALIZATION = "none"  # "l2" or "none"
 
 # Training parameters
 BATCH_SIZE = 64
@@ -73,12 +79,19 @@ NUM_EPOCHS_PRETRAIN = 60
 NUM_EPOCHS_FINETUNE = 120
 VALIDATION_SPLIT = 0.05
 TEST_SPLIT = 0.0
-EARLY_STOPPING_PATIENCE = 12
+EARLY_STOPPING_PATIENCE = 20
 
-# Mixed reconstruction loss: total = MSE_WEIGHT * MSE + COSINE_WEIGHT * (1 - cosine)
-LOSS_MSE_WEIGHT = 1.0
-LOSS_COSINE_WEIGHT = 0.0
+# Mixed reconstruction loss schedule: start with cosine, ramp to MSE
+LOSS_MSE_WEIGHT_START = 0.7
+LOSS_MSE_WEIGHT_END = 0.7
+LOSS_COSINE_WEIGHT_START = 0.3
+LOSS_COSINE_WEIGHT_END = 0.3
+LOSS_RAMP_EPOCHS = 40
 LOSS_COSINE_EPS = 1e-8
+
+# Contrastive negative term (push recon away from other speakers in batch)
+NEGATIVE_CONTRASTIVE_WEIGHT = 0.4
+NEGATIVE_CONTRASTIVE_MARGIN = 0.2
 
 # Audio settings
 SAMPLE_RATE = 16000
@@ -93,7 +106,7 @@ RANDOM_SEED = 42
 DVECTOR_CACHE_ENABLED = True
 DVECTOR_CACHE_DIR = "test_outputs/dvector_cache"
 DVECTOR_CACHE_VERSION = 1
-EXTRACTION_CACHE_NAME = "greedy_layerwise_libri_babble_pairs"
+EXTRACTION_CACHE_NAME = "deep_stacked_libri_babble_pairs"
 
 
 class NoisyCleanDvectorDataset(Dataset):
@@ -117,12 +130,20 @@ class NoisyCleanDvectorDataset(Dataset):
 class ShallowDenoisingAE(nn.Module):
     """Single-hidden-layer denoising autoencoder used for greedy pretraining."""
 
-    def __init__(self, input_dim, hidden_dim, dropout_rate=0.1, norm_type="batchnorm"):
+    def __init__(self, input_dim, hidden_dim, dropout_rate=0.1, norm_type="batchnorm", activation_type="tanh"):
         super().__init__()
         self.input_dim = int(input_dim)
         self.hidden_dim = int(hidden_dim)
         self.dropout_rate = float(dropout_rate)
         self.norm_type = str(norm_type).lower()
+        self.activation_type = str(activation_type).lower()
+
+        def _activation():
+            if self.activation_type == "tanh":
+                return nn.Tanh()
+            if self.activation_type == "relu":
+                return nn.ReLU()
+            raise ValueError(f"Unsupported activation_type: {activation_type}")
 
         def _norm(dim):
             if self.norm_type == "batchnorm":
@@ -134,7 +155,7 @@ class ShallowDenoisingAE(nn.Module):
         self.encoder = nn.Sequential(
             nn.Linear(self.input_dim, self.hidden_dim),
             _norm(self.hidden_dim),
-            nn.Tanh(),
+            _activation(),
             nn.Dropout(self.dropout_rate),
         )
         self.decoder = nn.Sequential(
@@ -144,7 +165,7 @@ class ShallowDenoisingAE(nn.Module):
     def forward(self, x):
         z = self.encoder(x)
         recon = self.decoder(z)
-        return F.normalize(recon, p=2, dim=-1, eps=1e-12)
+        return _normalize_output(recon)
 
     def encode(self, x):
         return self.encoder(x)
@@ -164,7 +185,7 @@ class StackedDenoisingAE(nn.Module):
             out = encoder(out)
         for decoder in reversed(self.decoders):
             out = decoder(out)
-        return F.normalize(out, p=2, dim=-1, eps=1e-12)
+        return _normalize_output(out)
 
 
 def _set_seed(seed):
@@ -179,7 +200,36 @@ def _cosine_loss(pred, target):
     return 1.0 - F.cosine_similarity(pred, target, dim=1, eps=LOSS_COSINE_EPS).mean()
 
 
-def _train_epoch(model, loader, optimizer, device):
+def _negative_contrastive_loss(pred, target, margin=0.2):
+    """Penalize similarity to mismatched targets using a simple in-batch shuffle."""
+    batch_size = pred.size(0)
+    if batch_size < 2:
+        return torch.tensor(0.0, device=pred.device)
+
+    shuffle = torch.randperm(batch_size, device=pred.device)
+    neg_target = target[shuffle]
+    cos_sim = F.cosine_similarity(pred, neg_target, dim=1, eps=LOSS_COSINE_EPS)
+    return F.relu(cos_sim - margin).mean()
+
+
+def _loss_weights_for_epoch(epoch_idx, total_epochs):
+    ramp_epochs = max(1, min(int(LOSS_RAMP_EPOCHS), int(total_epochs)))
+    t = min(1.0, float(epoch_idx) / float(ramp_epochs))
+    mse_w = LOSS_MSE_WEIGHT_START + t * (LOSS_MSE_WEIGHT_END - LOSS_MSE_WEIGHT_START)
+    cos_w = LOSS_COSINE_WEIGHT_START + t * (LOSS_COSINE_WEIGHT_END - LOSS_COSINE_WEIGHT_START)
+    return float(mse_w), float(cos_w)
+
+
+def _normalize_output(recon):
+    mode = str(OUTPUT_NORMALIZATION).lower()
+    if mode == "none":
+        return recon
+    if mode == "l2":
+        return F.normalize(recon, p=2, dim=1, eps=LOSS_COSINE_EPS)
+    raise ValueError(f"Unsupported OUTPUT_NORMALIZATION: {OUTPUT_NORMALIZATION}")
+
+
+def _train_epoch(model, loader, optimizer, device, mse_weight, cos_weight):
     model.train()
     total_loss = 0.0
     total_mse = 0.0
@@ -195,7 +245,10 @@ def _train_epoch(model, loader, optimizer, device):
         recon = model(noisy)
         mse = F.mse_loss(recon, clean)
         cos = _cosine_loss(recon, clean)
-        loss = (LOSS_MSE_WEIGHT * mse) + (LOSS_COSINE_WEIGHT * cos)
+        neg = _negative_contrastive_loss(
+            recon, clean, margin=NEGATIVE_CONTRASTIVE_MARGIN
+        )
+        loss = (mse_weight * mse) + (cos_weight * cos) + (NEGATIVE_CONTRASTIVE_WEIGHT * neg)
         loss.backward()
         optimizer.step()
 
@@ -207,7 +260,7 @@ def _train_epoch(model, loader, optimizer, device):
     return total_loss / n_batches, total_mse / n_batches, total_cos / n_batches
 
 
-def _eval_epoch(model, loader, device):
+def _eval_epoch(model, loader, device, mse_weight, cos_weight):
     model.eval()
     total_loss = 0.0
     total_mse = 0.0
@@ -223,7 +276,10 @@ def _eval_epoch(model, loader, device):
             recon = model(noisy)
             mse = F.mse_loss(recon, clean)
             cos = _cosine_loss(recon, clean)
-            loss = (LOSS_MSE_WEIGHT * mse) + (LOSS_COSINE_WEIGHT * cos)
+            neg = _negative_contrastive_loss(
+                recon, clean, margin=NEGATIVE_CONTRASTIVE_MARGIN
+            )
+            loss = (mse_weight * mse) + (cos_weight * cos) + (NEGATIVE_CONTRASTIVE_WEIGHT * neg)
 
             total_loss += loss.item()
             total_mse += mse.item()
@@ -239,13 +295,17 @@ def _train_model(model, train_loader, val_loader, device, lr, num_epochs, save_p
     patience = 0
 
     for epoch in range(num_epochs):
-        train_loss, train_mse, train_cos = _train_epoch(model, train_loader, optimizer, device)
-        val_loss, val_mse, val_cos = _eval_epoch(model, val_loader, device)
+        mse_w, cos_w = _loss_weights_for_epoch(epoch, num_epochs)
+        train_loss, train_mse, train_cos = _train_epoch(
+            model, train_loader, optimizer, device, mse_w, cos_w
+        )
+        val_loss, val_mse, val_cos = _eval_epoch(model, val_loader, device, mse_w, cos_w)
 
         print(
             f"Epoch {epoch + 1:03d}/{num_epochs} | "
             f"Train {train_loss:.6f} (mse {train_mse:.6f}, cos {train_cos:.6f}) | "
-            f"Val {val_loss:.6f} (mse {val_mse:.6f}, cos {val_cos:.6f})"
+            f"Val {val_loss:.6f} (mse {val_mse:.6f}, cos {val_cos:.6f}) | "
+            f"Weights mse={mse_w:.2f}, cos={cos_w:.2f}"
         )
 
         if val_loss < best_val:
@@ -287,6 +347,7 @@ def greedy_pretrain_layers(noisy_dvectors, clean_dvectors, input_dim, device, sa
             hidden_dim=hidden_dim,
             dropout_rate=DROPOUT_RATE,
             norm_type=NORM_TYPE,
+            activation_type=ACTIVATION_TYPE,
         ).to(device)
 
         train_idx, val_idx, _ = split_indices(
@@ -328,36 +389,82 @@ def main():
         save_dir = script_dir / save_dir
     save_dir.mkdir(parents=True, exist_ok=True)
 
+    cache_dir = Path(DVECTOR_CACHE_DIR)
+    if not cache_dir.is_absolute():
+        cache_dir = script_dir / cache_dir
+    if DVECTOR_CACHE_ENABLED:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
     print("=" * 90)
     print("GREEDY LAYER-WISE D-VECTOR DENOISING AUTOENCODER")
     print("=" * 90)
 
-    pair_data = extract_noisy_clean_dvector_pairs_from_libri(
-        librispeech_root=librispeech_root,
-        librispeech_subsets=LIBRISPEECH_SUBSETS,
-        musan_speech_noise_root=musan_root,
-        n_utterances=N_LIBRI_UTTERANCES,
-        min_utt_sec=MIN_UTTERANCE_SEC,
-        max_utt_sec=MAX_UTTERANCE_SEC,
-        sample_rate=SAMPLE_RATE,
-        device=DEVICE,
-        snr_range_db=MUSAN_BABBLE_SNR_RANGE_DB,
-        include_noise_only_zero_target_pairs=INCLUDE_NOISE_ONLY_SILENCE_TARGET_PAIRS,
-        random_seed=RANDOM_SEED,
-        preview_limit=0,
-        checkpoint_dir=None,
-    )
+    extraction_cache_config = {
+        "source": "deep_stacked_libri_noisy_clean_pairs",
+        "librispeech_root": str(librispeech_root.resolve()),
+        "librispeech_subsets": list(LIBRISPEECH_SUBSETS),
+        "n_librispeech_utterances": int(N_LIBRI_UTTERANCES),
+        "min_utterance_sec": float(MIN_UTTERANCE_SEC) if MIN_UTTERANCE_SEC is not None else None,
+        "max_utterance_sec": float(MAX_UTTERANCE_SEC) if MAX_UTTERANCE_SEC is not None else None,
+        "musan_speech_noise_root": str(musan_root.resolve()),
+        "sample_rate": int(SAMPLE_RATE),
+        "snr_range_db": list(MUSAN_BABBLE_SNR_RANGE_DB),
+        "random_seed": int(RANDOM_SEED),
+    }
+
+    if INCLUDE_NOISE_ONLY_SILENCE_TARGET_PAIRS:
+        extraction_cache_config["include_noise_only_silence_target_pairs"] = True
+
+    checkpoint_dir = _checkpoint_dir_for_config(cache_dir, EXTRACTION_CACHE_NAME, extraction_cache_config)
+
+    def _extract_pairs():
+        return extract_noisy_clean_dvector_pairs_from_libri(
+            librispeech_root=librispeech_root,
+            librispeech_subsets=LIBRISPEECH_SUBSETS,
+            musan_speech_noise_root=musan_root,
+            n_utterances=N_LIBRI_UTTERANCES,
+            min_utt_sec=MIN_UTTERANCE_SEC,
+            max_utt_sec=MAX_UTTERANCE_SEC,
+            sample_rate=SAMPLE_RATE,
+            device=DEVICE,
+            snr_range_db=MUSAN_BABBLE_SNR_RANGE_DB,
+            include_noise_only_zero_target_pairs=INCLUDE_NOISE_ONLY_SILENCE_TARGET_PAIRS,
+            random_seed=RANDOM_SEED,
+            preview_limit=0,
+            checkpoint_dir=checkpoint_dir,
+        )
+
+    if DVECTOR_CACHE_ENABLED:
+        pair_data = _extract_with_cache(
+            cache_dir=cache_dir,
+            cache_name=EXTRACTION_CACHE_NAME,
+            cache_config=extraction_cache_config,
+            extractor_fn=_extract_pairs,
+        )
+    else:
+        pair_data = _extract_pairs()
 
     noisy_dvectors = pair_data["noisy_dvectors"]
     clean_dvectors = pair_data["clean_dvectors"]
+
+    if INCLUDE_CLEAN_IDENTITY_PAIRS:
+        # Duplicate clean targets as identity inputs
+        noisy_dvectors = np.concatenate([noisy_dvectors, clean_dvectors], axis=0)
+        clean_dvectors = np.concatenate([clean_dvectors, clean_dvectors], axis=0)
     input_dim = int(noisy_dvectors.shape[1])
 
     print(f"\n[data] Pairs: {len(noisy_dvectors)} | Dim: {input_dim}")
+    if INCLUDE_CLEAN_IDENTITY_PAIRS:
+        print(f"  Added clean->clean identity pairs: {len(clean_dvectors) // 2}")
 
     pretrained_layers = greedy_pretrain_layers(noisy_dvectors, clean_dvectors, input_dim, DEVICE, save_dir)
 
     print("\n[stack] Assembling full stacked autoencoder")
     stacked_model = StackedDenoisingAE(pretrained_layers).to(DEVICE)
+    if DEVICE == "cuda":
+        summary(stacked_model.cuda(), (input_dim,))
+    else:
+        summary(stacked_model, (input_dim,))
 
     train_idx, val_idx, test_idx = split_indices(
         n_items=len(noisy_dvectors),
@@ -392,8 +499,13 @@ def main():
         "greedy_hidden_dims": list(GREEDY_LAYER_HIDDEN_DIMS),
         "dropout_rate": float(DROPOUT_RATE),
         "norm_type": str(NORM_TYPE),
-        "loss_mse_weight": float(LOSS_MSE_WEIGHT),
-        "loss_cosine_weight": float(LOSS_COSINE_WEIGHT),
+        "activation_type": str(ACTIVATION_TYPE),
+        "output_normalization": OUTPUT_NORMALIZATION,
+        "loss_mse_weight_start": float(LOSS_MSE_WEIGHT_START),
+        "loss_mse_weight_end": float(LOSS_MSE_WEIGHT_END),
+        "loss_cosine_weight_start": float(LOSS_COSINE_WEIGHT_START),
+        "loss_cosine_weight_end": float(LOSS_COSINE_WEIGHT_END),
+        "loss_ramp_epochs": int(LOSS_RAMP_EPOCHS),
         "learning_rate_pretrain": float(LEARNING_RATE_PRETRAIN),
         "learning_rate_finetune": float(LEARNING_RATE_FINETUNE),
         "num_epochs_pretrain": int(NUM_EPOCHS_PRETRAIN),
@@ -404,6 +516,7 @@ def main():
         "musan_speech_noise_root": str(musan_root),
         "musan_babble_snr_range_db": MUSAN_BABBLE_SNR_RANGE_DB,
         "include_noise_only_silence_target_pairs": bool(INCLUDE_NOISE_ONLY_SILENCE_TARGET_PAIRS),
+        "include_clean_identity_pairs": bool(INCLUDE_CLEAN_IDENTITY_PAIRS),
         "sample_rate": SAMPLE_RATE,
         "batch_size": BATCH_SIZE,
         "validation_split": VALIDATION_SPLIT,
@@ -423,15 +536,24 @@ def main():
         f.write(f"Hidden dims: {GREEDY_LAYER_HIDDEN_DIMS}\n")
         f.write(f"Dropout rate: {DROPOUT_RATE}\n")
         f.write(f"Norm type: {NORM_TYPE}\n")
+        f.write(f"Activation type: {ACTIVATION_TYPE}\n")
+        f.write(f"Output normalization: {OUTPUT_NORMALIZATION}\n")
         f.write(f"Libri root: {librispeech_root}\n")
         f.write(f"Libri subsets: {LIBRISPEECH_SUBSETS}\n")
         f.write(f"MUSAN speech root: {musan_root}\n")
         f.write(f"SNR values (dB): {MUSAN_BABBLE_SNR_RANGE_DB}\n")
         f.write(f"Include noise-only silence-target pairs: {INCLUDE_NOISE_ONLY_SILENCE_TARGET_PAIRS}\n")
+        f.write(f"Include clean identity pairs: {INCLUDE_CLEAN_IDENTITY_PAIRS}\n")
         f.write(f"Pretrain LR: {LEARNING_RATE_PRETRAIN}\n")
         f.write(f"Finetune LR: {LEARNING_RATE_FINETUNE}\n")
         f.write(f"Pretrain epochs: {NUM_EPOCHS_PRETRAIN}\n")
         f.write(f"Finetune epochs: {NUM_EPOCHS_FINETUNE}\n")
+        f.write(
+            "Loss schedule (mse, cos): "
+            f"{LOSS_MSE_WEIGHT_START}->{LOSS_MSE_WEIGHT_END}, "
+            f"{LOSS_COSINE_WEIGHT_START}->{LOSS_COSINE_WEIGHT_END} "
+            f"over {LOSS_RAMP_EPOCHS} epochs\n"
+        )
         f.write(f"Best val loss: {best_val:.6f}\n")
 
     print("\nDone.")

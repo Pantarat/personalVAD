@@ -47,7 +47,7 @@ See TRAINING SCHEME SELECTOR section in configuration for details.
 """
 
 import numpy as np
-from autoencoder_utils import DvectorAutoencoder
+from autoencoder_utils import DvectorAutoencoder, load_autoencoder
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -193,9 +193,9 @@ LIBRISPEECH_PATH = '../../data/LibriSpeech'
 # Overlap samples directories - can be a single directory (string) or list of directories
 # If list, model will load overlap samples from all directories
 # OVERLAP_SAMPLES_DIRS = ['test_outputs/84+30spk_300','test_outputs/116+30spk_300','test_outputs/700+30spk_300','test_outputs/1255+30spk_300','test_outputs/1585+30spk_300','test_outputs/1630+30spk_300']  # e.g., ['dir1', 'dir2', 'dir3'] for multiple
-OVERLAP_SAMPLES_DIRS = ['test_outputs/data/61/61_4pct_3utt-50spk+300Dev_5s_100pctmainspk_100pctAmp_2000']  # e.g., ['dir1', 'dir2', 'dir3'] for multiple
+OVERLAP_SAMPLES_DIRS = ['test_outputs/data/61/61_100pct_75utt-50spk+300Dev_5s_100pctmainspk_100pctAmp_2000']  # e.g., ['dir1', 'dir2', 'dir3'] for multiple
 NON_TARGET_OVERLAP_SAMPLES_DIR = 'test_outputs/non_target_overlap_samples'
-MODEL_SAVE_DIR = 'test_outputs/models/test_contrastive_models/dvector_ae-61_4pct_3utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_otherSingles_pretrain-2000_1e-5_100ep'  # Directory to save trained model and config
+MODEL_SAVE_DIR = 'test_outputs/models/greedy_finetune/dvector_ae-61_100pct_75utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_otherSingles_greedyPretrain-2000_1e-5_100ep'  # Directory to save trained model and config
 # MODEL_SAVE_DIR = 'test_outputs/test'
 
 # Single speaker dataset directories (HIGHEST PRIORITY for main speaker clean utterances)
@@ -204,30 +204,30 @@ MODEL_SAVE_DIR = 'test_outputs/models/test_contrastive_models/dvector_ae-61_4pct
 # These should be the same datasets used to generate the overlap samples
 SINGLE_SPEAKER_DATASETS = [
     '../../data/speaker_61/train1',
-    # '../../data/speaker_908/train2',
-    # '../../data/speaker_908/train3',
-    # '../../data/speaker_908/train4',
-    # '../../data/speaker_908/train5',
-    # '../../data/speaker_908/train6',
-    # '../../data/speaker_908/train7',
-    # '../../data/speaker_908/train8',
-    # '../../data/speaker_908/train9',
-    # '../../data/speaker_908/train10',
-    # '../../data/speaker_908/train11',
-    # '../../data/speaker_908/train12',
-    # '../../data/speaker_908/train13',
-    # '../../data/speaker_908/train14',
-    # '../../data/speaker_908/train15',
-    # '../../data/speaker_908/train16',
-    # '../../data/speaker_908/train17',
-    # '../../data/speaker_908/train18',
-    # '../../data/speaker_908/train19',
-    # '../../data/speaker_908/train20',
-    # '../../data/speaker_908/train21',
-    # '../../data/speaker_908/train22',
-    # '../../data/speaker_908/train23',
-    # '../../data/speaker_908/train24',
-    # '../../data/speaker_908/train25',
+    '../../data/speaker_61/train2',
+    '../../data/speaker_61/train3',
+    '../../data/speaker_61/train4',
+    '../../data/speaker_61/train5',
+    '../../data/speaker_61/train6',
+    '../../data/speaker_61/train7',
+    '../../data/speaker_61/train8',
+    '../../data/speaker_61/train9',
+    '../../data/speaker_61/train10',
+    '../../data/speaker_61/train11',
+    '../../data/speaker_61/train12',
+    '../../data/speaker_61/train13',
+    '../../data/speaker_61/train14',
+    '../../data/speaker_61/train15',
+    '../../data/speaker_61/train16',
+    '../../data/speaker_61/train17',
+    '../../data/speaker_61/train18',
+    '../../data/speaker_61/train19',
+    '../../data/speaker_61/train20',
+    '../../data/speaker_61/train21',
+    '../../data/speaker_61/train22',
+    '../../data/speaker_61/train23',
+    '../../data/speaker_61/train24',
+    '../../data/speaker_61/train25',
     # '../../data/speaker_174/train',
 ]  # List of single speaker dataset paths, or None to extract from LibriSpeech
 
@@ -299,25 +299,29 @@ LEARNING_RATE = 1e-5
 NUM_EPOCHS = 100
 VALIDATION_SPLIT = 0.1  # Fraction of data for validation (e.g., 0.2 = 20%)
 TEST_SPLIT = 0.01  # Fraction of data for test (e.g., 0.15 = 15%)
-EARLY_STOPPING_PATIENCE = 2000
+EARLY_STOPPING_PATIENCE = 10
 
 # Fine-tuning from pre-trained model
 # Set to path of pre-trained model directory (e.g., from train_dvector_autoencoder_identity.py)
 # to initialize weights before training. Set to None to train from scratch.
 # PRETRAINED_MODEL_PATH = 'test_outputs/dvector_ae_identity_1100x50Dev_noOV_1,6s_20-2-27' # e.g., 'test_outputs/dvector_ae_identity'
-PRETRAINED_MODEL_PATH = 'test_outputs/models/dvector_ae_identity_1100x50Dev_wOV_balanced_1,6s_v2_12-4-26'  # Uncomment to enable fine-tuning
+PRETRAINED_MODEL_PATH = 'test_outputs/models/greedy/dvector_ae_greedy_layerwise_14_6-5-26'  # Uncomment to enable fine-tuning
 
 # Model architecture
-HIDDEN_DIMS = [192, 128, 192]  # Encoder-bottleneck-decoder (increased bottleneck capacity)
+HIDDEN_DIMS = [192, 192]  # Encoder-bottleneck-decoder (increased bottleneck capacity)
 DROPOUT_RATE = 0.05
 AE_NORM_TYPE = 'layernorm'
 AE_USE_RESIDUAL = False
 AE_RESIDUAL_SCALE_INIT = 0.5
 
 # Mixed reconstruction loss: total = MSE_WEIGHT * MSE + COSINE_WEIGHT * (1 - cosine)
-LOSS_MSE_WEIGHT = 0.3
-LOSS_COSINE_WEIGHT = 0.7
+LOSS_MSE_WEIGHT = 0.7
+LOSS_COSINE_WEIGHT = 0.3
 LOSS_COSINE_EPS = 1e-8
+
+# Negative contrastive term (push recon away from mismatched targets)
+NEGATIVE_CONTRASTIVE_WEIGHT = 0.2
+NEGATIVE_CONTRASTIVE_MARGIN = 0.2
 
 # Device
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -1986,9 +1990,11 @@ def train_model(model, train_loader, val_loader, num_epochs, learning_rate, devi
         'train_loss': [],
         'train_mse_loss': [],
         'train_cosine_loss': [],
+        'train_negative_loss': [],
         'val_loss': [],
         'val_mse_loss': [],
         'val_cosine_loss': [],
+        'val_negative_loss': [],
         'learning_rate': []
     }
     
@@ -2001,6 +2007,7 @@ def train_model(model, train_loader, val_loader, num_epochs, learning_rate, devi
         train_loss = 0.0
         train_mse_loss = 0.0
         train_cosine_loss = 0.0
+        train_negative_loss = 0.0
         
         for batch_idx, batch in enumerate(train_loader):
             if len(batch) >= 2:
@@ -2018,7 +2025,20 @@ def train_model(model, train_loader, val_loader, num_epochs, learning_rate, devi
             cosine_loss = 1.0 - F.cosine_similarity(
                 reconstructed, clean_norm, dim=1, eps=LOSS_COSINE_EPS
             ).mean()
-            loss = (LOSS_MSE_WEIGHT * mse_loss) + (LOSS_COSINE_WEIGHT * cosine_loss)
+            if overlap.size(0) > 1:
+                shuffle = torch.randperm(overlap.size(0), device=overlap.device)
+                neg_target = clean_norm[shuffle]
+                neg_cos = F.cosine_similarity(
+                    reconstructed, neg_target, dim=1, eps=LOSS_COSINE_EPS
+                )
+                negative_loss = F.relu(neg_cos - NEGATIVE_CONTRASTIVE_MARGIN).mean()
+            else:
+                negative_loss = torch.tensor(0.0, device=overlap.device)
+            loss = (
+                (LOSS_MSE_WEIGHT * mse_loss)
+                + (LOSS_COSINE_WEIGHT * cosine_loss)
+                + (NEGATIVE_CONTRASTIVE_WEIGHT * negative_loss)
+            )
             
             # Backward pass
             loss.backward()
@@ -2027,16 +2047,19 @@ def train_model(model, train_loader, val_loader, num_epochs, learning_rate, devi
             train_loss += loss.item()
             train_mse_loss += mse_loss.item()
             train_cosine_loss += cosine_loss.item()
+            train_negative_loss += negative_loss.item()
         
         train_loss /= len(train_loader)
         train_mse_loss /= len(train_loader)
         train_cosine_loss /= len(train_loader)
+        train_negative_loss /= len(train_loader)
         
         # Validation phase
         model.eval()
         val_loss = 0.0
         val_mse_loss = 0.0
         val_cosine_loss = 0.0
+        val_negative_loss = 0.0
         
         with torch.no_grad():
             for batch in val_loader:
@@ -2053,14 +2076,29 @@ def train_model(model, train_loader, val_loader, num_epochs, learning_rate, devi
                 cosine_loss = 1.0 - F.cosine_similarity(
                     reconstructed, clean_norm, dim=1, eps=LOSS_COSINE_EPS
                 ).mean()
-                loss = (LOSS_MSE_WEIGHT * mse_loss) + (LOSS_COSINE_WEIGHT * cosine_loss)
+                if overlap.size(0) > 1:
+                    shuffle = torch.randperm(overlap.size(0), device=overlap.device)
+                    neg_target = clean_norm[shuffle]
+                    neg_cos = F.cosine_similarity(
+                        reconstructed, neg_target, dim=1, eps=LOSS_COSINE_EPS
+                    )
+                    negative_loss = F.relu(neg_cos - NEGATIVE_CONTRASTIVE_MARGIN).mean()
+                else:
+                    negative_loss = torch.tensor(0.0, device=overlap.device)
+                loss = (
+                    (LOSS_MSE_WEIGHT * mse_loss)
+                    + (LOSS_COSINE_WEIGHT * cosine_loss)
+                    + (NEGATIVE_CONTRASTIVE_WEIGHT * negative_loss)
+                )
                 val_loss += loss.item()
                 val_mse_loss += mse_loss.item()
                 val_cosine_loss += cosine_loss.item()
+                val_negative_loss += negative_loss.item()
         
         val_loss /= len(val_loader)
         val_mse_loss /= len(val_loader)
         val_cosine_loss /= len(val_loader)
+        val_negative_loss /= len(val_loader)
         
         # Update learning rate
         scheduler.step(val_loss)
@@ -2070,17 +2108,19 @@ def train_model(model, train_loader, val_loader, num_epochs, learning_rate, devi
         history['train_loss'].append(train_loss)
         history['train_mse_loss'].append(train_mse_loss)
         history['train_cosine_loss'].append(train_cosine_loss)
+        history['train_negative_loss'].append(train_negative_loss)
         history['val_loss'].append(val_loss)
         history['val_mse_loss'].append(val_mse_loss)
         history['val_cosine_loss'].append(val_cosine_loss)
+        history['val_negative_loss'].append(val_negative_loss)
         history['learning_rate'].append(current_lr)
         
         # Print progress
         if (epoch + 1) % 5 == 0 or epoch == 0:
             print(
                 f"  Epoch [{epoch+1}/{num_epochs}] - "
-                f"Train Mixed: {train_loss:.6f} (MSE {train_mse_loss:.6f}, Cos {train_cosine_loss:.6f}), "
-                f"Val Mixed: {val_loss:.6f} (MSE {val_mse_loss:.6f}, Cos {val_cosine_loss:.6f}), "
+                f"Train Mixed: {train_loss:.6f} (MSE {train_mse_loss:.6f}, Cos {train_cosine_loss:.6f}, Neg {train_negative_loss:.6f}), "
+                f"Val Mixed: {val_loss:.6f} (MSE {val_mse_loss:.6f}, Cos {val_cosine_loss:.6f}, Neg {val_negative_loss:.6f}), "
                 f"LR: {current_lr:.6f}"
             )
         
@@ -2125,6 +2165,7 @@ def evaluate_model(model, test_loader, device):
     total_loss = 0.0
     total_mse_loss = 0.0
     total_cosine_loss = 0.0
+    total_negative_loss = 0.0
     
     all_overlap = []
     all_clean = []
@@ -2145,10 +2186,24 @@ def evaluate_model(model, test_loader, device):
             cosine_loss = 1.0 - F.cosine_similarity(
                 reconstructed, clean_norm, dim=1, eps=LOSS_COSINE_EPS
             ).mean()
-            loss = (LOSS_MSE_WEIGHT * mse_loss) + (LOSS_COSINE_WEIGHT * cosine_loss)
+            if overlap.size(0) > 1:
+                shuffle = torch.randperm(overlap.size(0), device=overlap.device)
+                neg_target = clean_norm[shuffle]
+                neg_cos = F.cosine_similarity(
+                    reconstructed, neg_target, dim=1, eps=LOSS_COSINE_EPS
+                )
+                negative_loss = F.relu(neg_cos - NEGATIVE_CONTRASTIVE_MARGIN).mean()
+            else:
+                negative_loss = torch.tensor(0.0, device=overlap.device)
+            loss = (
+                (LOSS_MSE_WEIGHT * mse_loss)
+                + (LOSS_COSINE_WEIGHT * cosine_loss)
+                + (NEGATIVE_CONTRASTIVE_WEIGHT * negative_loss)
+            )
             total_loss += loss.item()
             total_mse_loss += mse_loss.item()
             total_cosine_loss += cosine_loss.item()
+            total_negative_loss += negative_loss.item()
             
             all_overlap.append(overlap.cpu().numpy())
             all_clean.append(clean_norm.cpu().numpy())
@@ -2157,6 +2212,7 @@ def evaluate_model(model, test_loader, device):
     avg_loss = total_loss / len(test_loader)
     avg_mse_loss = total_mse_loss / len(test_loader)
     avg_cosine_loss = total_cosine_loss / len(test_loader)
+    avg_negative_loss = total_negative_loss / len(test_loader)
     
     # Concatenate all batches
     all_overlap = np.concatenate(all_overlap, axis=0)
@@ -2177,6 +2233,7 @@ def evaluate_model(model, test_loader, device):
     print(f"    Mixed Loss: {avg_loss:.6f}")
     print(f"    MSE Loss: {avg_mse_loss:.6f}")
     print(f"    Cosine Loss: {avg_cosine_loss:.6f}")
+    print(f"    Negative Loss: {avg_negative_loss:.6f}")
     print(f"    Cosine Similarity: {cosine_sims.mean():.4f} ± {cosine_sims.std():.4f}")
     print(f"    Min Cosine Sim: {cosine_sims.min():.4f}")
     print(f"    Max Cosine Sim: {cosine_sims.max():.4f}")
@@ -2185,6 +2242,7 @@ def evaluate_model(model, test_loader, device):
         'mixed_loss': avg_loss,
         'mse_loss': avg_mse_loss,
         'cosine_loss': avg_cosine_loss,
+        'negative_loss': avg_negative_loss,
         'cosine_similarity': cosine_sims,
         'overlap': all_overlap,
         'clean': all_clean,
@@ -2312,6 +2370,8 @@ def save_model_and_config(model, config, save_dir):
         f.write(f"Number of epochs: {config['num_epochs']}\n")
         f.write(f"Loss MSE weight: {config.get('loss_mse_weight', 'n/a')}\n")
         f.write(f"Loss cosine weight: {config.get('loss_cosine_weight', 'n/a')}\n")
+        f.write(f"Loss negative weight: {config.get('loss_negative_weight', 'n/a')}\n")
+        f.write(f"Loss negative margin: {config.get('loss_negative_margin', 'n/a')}\n")
         f.write(f"Validation split: {config['validation_split']:.1%}\n")
         f.write(f"Test split: {config['test_split']:.1%}\n")
         f.write(f"Early stopping patience: {config['early_stopping_patience']}\n")
@@ -2319,6 +2379,8 @@ def save_model_and_config(model, config, save_dir):
         f.write(f"Device: {config['device']}\n")
         if config.get('pretrained_model_path'):
             f.write(f"Fine-tuned from: {config['pretrained_model_path']}\n")
+            if config.get('pretrained_model_type'):
+                f.write(f"Pretrained model type: {config['pretrained_model_type']}\n")
         else:
             f.write(f"Training from scratch: Yes\n")
         f.write("\n")
@@ -3508,15 +3570,29 @@ def main():
     dvector_dim = sample_dvec.shape[0]
     print(f"\n  D-vector dimension: {dvector_dim}")
     
-    # Create model
-    model = DvectorAutoencoder(
-        input_dim=dvector_dim,
-        hidden_dims=HIDDEN_DIMS,
-        dropout_rate=DROPOUT_RATE,
-        norm_type=AE_NORM_TYPE,
-        use_residual=AE_USE_RESIDUAL,
-        residual_scale_init=AE_RESIDUAL_SCALE_INIT,
-    )
+    pretrained_config = None
+    model = None
+    if PRETRAINED_MODEL_PATH is not None:
+        pretrained_path = Path(PRETRAINED_MODEL_PATH)
+        if pretrained_path.exists():
+            try:
+                model, pretrained_config = load_autoencoder(pretrained_path, DEVICE)
+                print(f"✓ Loaded pretrained model from: {pretrained_path}")
+            except Exception as e:
+                print(f"⚠️  Warning: Pretrained load failed ({e}); falling back to scratch model")
+                model = None
+        else:
+            print(f"⚠️  Warning: Pretrained model path not found: {pretrained_path}")
+
+    if model is None:
+        model = DvectorAutoencoder(
+            input_dim=dvector_dim,
+            hidden_dims=HIDDEN_DIMS,
+            dropout_rate=DROPOUT_RATE,
+            norm_type=AE_NORM_TYPE,
+            use_residual=AE_USE_RESIDUAL,
+            residual_scale_init=AE_RESIDUAL_SCALE_INIT,
+        )
     
     print(f"\n🏗️  Model architecture:")
     print(model)
@@ -3526,24 +3602,11 @@ def main():
     print(f"\n  Total parameters: {total_params:,}")
     print(f"  Trainable parameters: {trainable_params:,}")
     
-    # Load pre-trained weights if specified
-    if PRETRAINED_MODEL_PATH is not None:
-        pretrained_path = Path(PRETRAINED_MODEL_PATH)
-        model_file = pretrained_path / 'final_model.pth'
-        
-        if model_file.exists():
-            print(f"\n🔄 Loading pre-trained weights from: {model_file}")
-            try:
-                pretrained_state = torch.load(model_file, map_location=DEVICE)
-                model.load_state_dict(pretrained_state, strict=True)
-                print(f"✓ Successfully loaded pre-trained weights")
-                print(f"  Fine-tuning from pre-trained identity autoencoder")
-            except Exception as e:
-                print(f"⚠️  Warning: Could not load pre-trained weights: {e}")
-                print(f"  Training from scratch instead")
-        else:
-            print(f"⚠️  Warning: Pre-trained model file not found: {model_file}")
-            exit(1)
+    if pretrained_config is not None and int(pretrained_config.get('input_dim', dvector_dim)) != int(dvector_dim):
+        print(
+            "⚠️  Warning: pretrained input_dim does not match current d-vector dim; "
+            "check dataset or model config."
+        )
     
     # Train model
     history, best_val_loss = train_model(
@@ -3619,6 +3682,8 @@ def main():
         'num_epochs': NUM_EPOCHS,
         'loss_mse_weight': LOSS_MSE_WEIGHT,
         'loss_cosine_weight': LOSS_COSINE_WEIGHT,
+        'loss_negative_weight': NEGATIVE_CONTRASTIVE_WEIGHT,
+        'loss_negative_margin': NEGATIVE_CONTRASTIVE_MARGIN,
         'validation_split': VALIDATION_SPLIT,
         'test_split': TEST_SPLIT,
         'early_stopping_patience': EARLY_STOPPING_PATIENCE,
@@ -3697,6 +3762,7 @@ def main():
         'random_seed': RANDOM_SEED,
         'device': DEVICE,
         'pretrained_model_path': PRETRAINED_MODEL_PATH,
+        'pretrained_model_type': pretrained_config.get('model_type') if pretrained_config else None,
     }
     
     save_model_and_config(model, config, save_dir)

@@ -45,6 +45,10 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="resemblyzer")
 BASE_IDENTITY_MODEL_DIR = None
 INIT_FIRST_DAE_FROM_BASE = False
 
+# Optional greedy-layerwise initialization for first block
+GREEDY_INIT_MODEL_DIR = 'test_outputs/models/dvector_ae_greedy_layerwise_8_2-5-26'
+INIT_FIRST_BLOCK_FROM_GREEDY = True
+
 # LibriSpeech source
 LIBRISPEECH_ROOT = "../../data/LibriSpeech"
 LIBRISPEECH_SUBSETS = [
@@ -69,7 +73,7 @@ N_AUGMENTED_AUDIO_PREVIEW = 10
 AUGMENTED_AUDIO_PREVIEW_DIR = "test_outputs/debug/deep_stacked_libri_augmented_preview"
 
 # Output model directory
-MODEL_SAVE_DIR = "test_outputs/models/dvector_ae_deep_stacked_libri_babble_9_1-5-26"
+MODEL_SAVE_DIR = "test_outputs/models/dvector_ae_deep_stacked_greedy_babble_11_4-5-26"
 
 # Deep stacked architecture
 DEEP_STACKED_NUM_DAES = 2
@@ -84,6 +88,7 @@ FALLBACK_HIDDEN_DIMS = []
 # FALLBACK_HIDDEN_DIMS = [192,128,192]
 FALLBACK_DROPOUT_RATE = 0.1
 FALLBACK_NORM_TYPE = "batchnorm"
+FALLBACK_ACTIVATION_TYPE = "tanh"
 FALLBACK_USE_RESIDUAL = False
 FALLBACK_RESIDUAL_SCALE_INIT = 0.5
 
@@ -96,8 +101,8 @@ TEST_SPLIT = 0.0
 EARLY_STOPPING_PATIENCE = 10
 
 # Mixed reconstruction loss: total = MSE_WEIGHT * MSE + COSINE_WEIGHT * (1 - cosine)
-LOSS_MSE_WEIGHT = 1
-LOSS_COSINE_WEIGHT = 0
+LOSS_MSE_WEIGHT = 0.3
+LOSS_COSINE_WEIGHT = 0.7
 LOSS_COSINE_EPS = 1e-8
 
 # Audio settings
@@ -686,14 +691,20 @@ def build_model(device, dvector_dim):
     """Build deep stacked model and optionally initialize first DAE from base model."""
     base_model = None
     base_model_config = {}
+    greedy_model = None
+    greedy_model_config = {}
 
     if BASE_IDENTITY_MODEL_DIR is not None and str(BASE_IDENTITY_MODEL_DIR).strip() != "":
         base_model, base_model_config = load_autoencoder(BASE_IDENTITY_MODEL_DIR, device)
+
+    if GREEDY_INIT_MODEL_DIR is not None and str(GREEDY_INIT_MODEL_DIR).strip() != "":
+        greedy_model, greedy_model_config = load_autoencoder(GREEDY_INIT_MODEL_DIR, device)
 
     input_dim = int(base_model_config.get("input_dim", dvector_dim if dvector_dim > 0 else FALLBACK_INPUT_DIM))
     hidden_dims = list(base_model_config.get("hidden_dims", FALLBACK_HIDDEN_DIMS))
     dropout_rate = float(base_model_config.get("dropout_rate", FALLBACK_DROPOUT_RATE))
     norm_type = str(base_model_config.get("norm_type", FALLBACK_NORM_TYPE))
+    activation_type = str(base_model_config.get("activation_type", FALLBACK_ACTIVATION_TYPE))
     use_residual = bool(base_model_config.get("use_residual", FALLBACK_USE_RESIDUAL))
     residual_scale_init = float(base_model_config.get("residual_scale_init", FALLBACK_RESIDUAL_SCALE_INIT))
 
@@ -702,12 +713,24 @@ def build_model(device, dvector_dim):
         hidden_dims=hidden_dims,
         dropout_rate=dropout_rate,
         norm_type=norm_type,
+        activation_type=activation_type,
         use_residual=use_residual,
         residual_scale_init=residual_scale_init,
         n_stacked_daes=int(DEEP_STACKED_NUM_DAES),
         stack_refinement_hidden_dims=DEEP_STACKED_REFINEMENT_HIDDEN_DIMS,
         first_block_hidden_dims=DEEP_STACKED_FIRST_BLOCK_HIDDEN_DIMS,
     )
+
+    if INIT_FIRST_BLOCK_FROM_GREEDY and greedy_model is not None:
+        greedy_hidden_dims = greedy_model_config.get("greedy_hidden_dims", [])
+        expected_hidden_dims = list(DEEP_STACKED_FIRST_BLOCK_HIDDEN_DIMS)
+        if list(greedy_hidden_dims) != list(expected_hidden_dims):
+            print(
+                "[init] Greedy init skipped: hidden dims mismatch "
+                f"(greedy={greedy_hidden_dims}, first_block={expected_hidden_dims})"
+            )
+        else:
+            _init_first_block_from_greedy(model, greedy_model)
     
     # Print model summary
     if device == "cuda":
@@ -721,6 +744,7 @@ def build_model(device, dvector_dim):
         "hidden_dims": list(hidden_dims),
         "dropout_rate": float(dropout_rate),
         "norm_type": str(norm_type),
+        "activation_type": str(activation_type),
         "use_residual": bool(use_residual),
         "residual_scale_init": float(residual_scale_init),
         "n_stacked_daes": int(DEEP_STACKED_NUM_DAES),
@@ -729,9 +753,60 @@ def build_model(device, dvector_dim):
             [int(v) for v in block_dims] if isinstance(block_dims, (list, tuple)) else int(block_dims)
             for block_dims in DEEP_STACKED_REFINEMENT_HIDDEN_DIMS
         ],
+        "greedy_init_model_dir": str(GREEDY_INIT_MODEL_DIR) if GREEDY_INIT_MODEL_DIR else None,
+        "init_first_block_from_greedy": bool(INIT_FIRST_BLOCK_FROM_GREEDY),
+        "greedy_init_hidden_dims": list(greedy_model_config.get("greedy_hidden_dims", [])),
     }
 
     return model, base_model_config, resolved_config
+
+
+def _linear_layers(module):
+    return [layer for layer in module.modules() if isinstance(layer, torch.nn.Linear)]
+
+
+def _init_first_block_from_greedy(model, greedy_model):
+    """Initialize deep-stacked first block from greedy-layerwise stacked model."""
+    greedy_encoders = getattr(greedy_model, "encoders", None)
+    greedy_decoders = getattr(greedy_model, "decoders", None)
+    if greedy_encoders is None or greedy_decoders is None:
+        print("[init] Greedy init skipped: model has no encoders/decoders")
+        return
+
+    greedy_encoder_linears = []
+    for encoder in greedy_encoders:
+        greedy_encoder_linears.extend(_linear_layers(encoder))
+
+    greedy_decoder_linears = []
+    for decoder in greedy_decoders:
+        greedy_decoder_linears.extend(_linear_layers(decoder))
+
+    greedy_linears = list(greedy_encoder_linears) + list(reversed(greedy_decoder_linears))
+    first_block_linears = _linear_layers(model.first_block.net)
+
+    if len(greedy_linears) != len(first_block_linears):
+        print(
+            "[init] Greedy init skipped: linear count mismatch "
+            f"(greedy={len(greedy_linears)}, first_block={len(first_block_linears)})"
+        )
+        return
+
+    for src, dst in zip(greedy_linears, first_block_linears):
+        if src.weight.shape != dst.weight.shape or src.bias.shape != dst.bias.shape:
+            print("[init] Greedy init skipped: layer shape mismatch")
+            return
+
+    with torch.no_grad():
+        for src, dst in zip(greedy_linears, first_block_linears):
+            dst.weight.copy_(src.weight)
+            dst.bias.copy_(src.bias)
+
+    print("[init] First block initialized from greedy-layerwise model")
+
+
+def _normalize_output(recon):
+    recon = torch.sigmoid(recon)
+    return F.normalize(recon, p=2, dim=1, eps=LOSS_COSINE_EPS)
 
 
 def evaluate_model(model, data_loader, device):
@@ -756,6 +831,7 @@ def evaluate_model(model, data_loader, device):
             noisy_batch = F.normalize(noisy_batch, p=2, dim=1, eps=LOSS_COSINE_EPS)
 
             recon = model(noisy_batch)
+            recon = _normalize_output(recon)
 
             mse_loss = F.mse_loss(recon, clean_batch_norm)
             cos_loss = 1.0 - F.cosine_similarity(
@@ -842,6 +918,7 @@ def train_model(model, train_loader, val_loader, num_epochs, learning_rate, devi
 
             optimizer.zero_grad()
             recon = model(noisy_batch)
+            recon = _normalize_output(recon)
             # print(f"recon shape: {recon.shape}, clean_batch shape: {clean_batch_norm.shape}")
 
             mse_loss = F.mse_loss(recon, clean_batch_norm)
@@ -1093,6 +1170,8 @@ def main():
     print("\n[config]")
     print(f"  Base model dir: {base_model_dir}")
     print(f"  Init first DAE from base: {INIT_FIRST_DAE_FROM_BASE}")
+    print(f"  Greedy init model dir: {GREEDY_INIT_MODEL_DIR}")
+    print(f"  Init first block from greedy: {INIT_FIRST_BLOCK_FROM_GREEDY}")
     print(f"  Libri root: {librispeech_root}")
     print(f"  Libri subsets: {LIBRISPEECH_SUBSETS}")
     print(f"  Libri utterances target: {N_LIBRI_UTTERANCES}")
@@ -1272,6 +1351,7 @@ def main():
         "hidden_dims": resolved_model_config["hidden_dims"],
         "dropout_rate": resolved_model_config["dropout_rate"],
         "norm_type": resolved_model_config["norm_type"],
+        "activation_type": resolved_model_config["activation_type"],
         "use_residual": resolved_model_config["use_residual"],
         "residual_scale_init": resolved_model_config["residual_scale_init"],
         "n_stacked_daes": resolved_model_config["n_stacked_daes"],
@@ -1282,6 +1362,8 @@ def main():
         "base_model_config": base_model_config,
         "deep_stacked_enabled": True,
         "deep_stacked_init_first_dae_from_base": bool(INIT_FIRST_DAE_FROM_BASE),
+        "greedy_init_model_dir": str(GREEDY_INIT_MODEL_DIR) if GREEDY_INIT_MODEL_DIR else None,
+        "init_first_block_from_greedy": bool(INIT_FIRST_BLOCK_FROM_GREEDY),
 
         "librispeech_root": str(librispeech_root),
         "librispeech_subsets": list(LIBRISPEECH_SUBSETS),

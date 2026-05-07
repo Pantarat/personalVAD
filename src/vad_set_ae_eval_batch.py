@@ -10,6 +10,7 @@ Usage:
 """
 
 import torch
+import torch.nn as nn
 from torch.utils.data import DataLoader, Subset
 import numpy as np
 import os
@@ -19,6 +20,7 @@ import re
 from pathlib import Path
 import csv
 from datetime import datetime
+import matplotlib.pyplot as plt
 
 # Import from vad_set_ae_eval to reuse evaluation logic
 from vad_set_ae_eval import (
@@ -65,19 +67,35 @@ AE_MODEL_LIST = [
     # '../../dvector_ae_identity_1100x50Dev_noOV_1,6s_20-2-27',
     # '../dvector_ae_identity_1100x50Dev_wOV_balanced_1,6s_1-4-26',
     # '../dvector_ae_identity_1100x50Dev_wOV_balanced_1,6s_v2_10-4-26',
-    # '../dvector_ae_identity_1100x50Dev_wOV_balanced_1,6s_v2_12-4-26',
+    '../dvector_ae_identity_1100x50Dev_wOV_balanced_1,6s_v2_12-4-26',
     # '../dvector_ae_intermediate_babble_finetune_18-4-26', # Different than pretrain data (0.3 mse, 0.7 cos, lr 1e-4 0-15 SNR)
     # '../dvector_ae_intermediate_babble_finetune_20-4-26', # Different than pretrain data (0.1 mse, 0.9 cos, lr 1e-4 0-15 SNR)
     # '../dvector_ae_intermediate_babble_finetune_21-4-26', # Same as pretrain data (0.3 mse, 0.7 cos, lr 1e-5 0-15 SNR)
     # '../dvector_ae_intermediate_babble_finetune_22-4-26', # Same as pretrain data (0.3 mse, 0.7 cos, lr 1e-5 (20.0, 17.0, 15.0, 13.0)SNR)
-    '../dvector_ae_deep_stacked_libri_babble_1_29-4-26',
-    '../dvector_ae_deep_stacked_libri_babble_2_29-4-26',
-    '../dvector_ae_deep_stacked_libri_babble_3_30-4-26',
-    '../dvector_ae_deep_stacked_libri_babble_4_30-4-26',
-    '../dvector_ae_deep_stacked_libri_babble_5_30-4-26',
-    '../dvector_ae_deep_stacked_libri_babble_6_30-4-26',
-    '../dvector_ae_deep_stacked_libri_babble_7_1-5-26',
-    '../dvector_ae_deep_stacked_libri_babble_8_1-5-26',
+    # '../dvector_ae_deep_stacked_libri_babble_1_29-4-26',
+    # '../dvector_ae_deep_stacked_libri_babble_2_29-4-26',
+    # '../dvector_ae_deep_stacked_libri_babble_3_30-4-26',
+    # '../dvector_ae_deep_stacked_libri_babble_4_30-4-26',
+    # '../dvector_ae_deep_stacked_libri_babble_5_30-4-26',
+    # '../dvector_ae_deep_stacked_libri_babble_6_30-4-26',
+    # '../dvector_ae_deep_stacked_libri_babble_7_1-5-26',
+    # '../dvector_ae_deep_stacked_libri_babble_8_1-5-26',
+    # '../dvector_ae_deep_stacked_libri_babble_9_1-5-26',
+    # '../greedy/dvector_ae_greedy_layerwise_1_2-5-26',
+    # '../greedy/dvector_ae_greedy_layerwise_2_2-5-26',
+    # '../greedy/dvector_ae_greedy_layerwise_3_2-5-26',
+    # '../greedy/dvector_ae_greedy_layerwise_4_2-5-26',
+    # '../greedy/dvector_ae_greedy_layerwise_5_2-5-26',
+    # '../greedy/dvector_ae_greedy_layerwise_6_2-5-26',
+    # '../greedy/dvector_ae_greedy_layerwise_7_2-5-26',
+    # '../greedy/dvector_ae_greedy_layerwise_8_2-5-26',
+    # '../greedy/dvector_ae_greedy_layerwise_9_5-5-26',
+    # '../greedy/dvector_ae_greedy_layerwise_10_5-5-26',
+    # '../greedy/dvector_ae_greedy_layerwise_11_5-5-26',
+    '../greedy/dvector_ae_greedy_layerwise_14_6-5-26',
+    '../greedy/dvector_ae_greedy_layerwise_15_6-5-26',
+    # '../dvector_ae_deep_stacked_greedy_babble_10_4-5-26',
+    # '../dvector_ae_deep_stacked_greedy_babble_11_4-5-26',
     
     # 'dvector_ae-84_100pct_76utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
     # 'dvector_ae-84_100pct_76utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_10ep',
@@ -183,6 +201,17 @@ LABEL_FRAME_STEP_SEC = 0.01  # Label frame duration in seconds (txt format: star
 EXAMPLE_LABELS_DIR = 'model_evaluation_results/example_labels'
 SHOW_CONFUSION_MATRIX_PERCENT = True
 
+# Similarity score plotting
+PLOT_SIMILARITY_SCORES = True
+SIMILARITY_PLOTS_DIR = 'model_evaluation_results/similarity_scores'
+SIMILARITY_SCORE_SAMPLE_STEP = 5
+SIMILARITY_SCORE_MAX_UTTS = 50
+
+# Per-model activation override (tanh/relu). Leave empty to use config.
+AE_ACTIVATION_OVERRIDE = {
+    'dvector_ae_identity_1100x50Dev_wOV_balanced_1,6s_v2_12-4-26': 'relu',
+}
+
 # Reconstruction mode behavior for enrolled d-vectors
 # TRANSFORM_ENROLLED_DVECTOR_FORSIMSCORE_IN_RECONSTRUCTION = False  # Safer default: avoids inflated target false positives
 # TRANSFORM_ENROLLED_VADINPUT_DVECTOR_IN_RECONSTRUCTION = False
@@ -190,7 +219,8 @@ SHOW_CONFUSION_MATRIX_PERCENT = True
 
 def _get_ae_bottleneck_dim(ae_config):
     """Resolve bottleneck dimension from AE config for standard or stacked variants."""
-    if str(ae_config.get('model_type', 'dvector_autoencoder')).lower() == 'deep_stacked_dae':
+    model_type = str(ae_config.get('model_type', 'dvector_autoencoder')).lower()
+    if model_type in ('deep_stacked_dae', 'greedy_layerwise_stacked'):
         return int(ae_config.get('input_dim', 256))
 
     hidden_dims = ae_config.get('hidden_dims')
@@ -238,6 +268,78 @@ def _export_example_label_files(base_dir, model_name, examples, frame_step_sec=0
         _write_label_sequence_txt(model_dir / f"{key_safe}_match_mismatch_label.txt", match_labels, frame_step_sec)
 
     return model_dir
+
+
+def _plot_similarity_scores(model_name, score_dict_by_class, output_dir):
+    if not score_dict_by_class:
+        return None
+
+    class_names = {0: 'NS', 1: 'NTSS', 2: 'TSS'}
+    class_scores = {}
+    for cls in (0, 1, 2):
+        entries = score_dict_by_class.get(cls, [])
+        if entries:
+            class_scores[cls] = np.concatenate(entries)
+        else:
+            class_scores[cls] = np.array([], dtype=np.float32)
+
+    if not any(scores.size for scores in class_scores.values()):
+        return None
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = _sanitize_filename(model_name)
+
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+
+    colors = {0: 'steelblue', 1: 'darkorange', 2: 'seagreen'}
+    for cls in (0, 1, 2):
+        if class_scores[cls].size:
+            axes[0].hist(
+                class_scores[cls],
+                bins=60,
+                alpha=0.55,
+                color=colors[cls],
+                label=class_names[cls],
+            )
+    axes[0].set_title('Cosine Similarity Distribution (by label)')
+    axes[0].set_xlabel('Cosine similarity')
+    axes[0].set_ylabel('Count')
+    axes[0].grid(True, alpha=0.3)
+    axes[0].legend(frameon=False)
+
+    mean_vals = [np.mean(class_scores[c]) if class_scores[c].size else np.nan for c in (0, 1, 2)]
+    axes[1].bar([class_names[c] for c in (0, 1, 2)], mean_vals, color=[colors[c] for c in (0, 1, 2)])
+    axes[1].set_title('Mean Similarity by Label')
+    axes[1].set_xlabel('True label')
+    axes[1].set_ylabel('Mean cosine similarity')
+    axes[1].grid(True, alpha=0.3)
+
+    fig.suptitle(f'SV Similarity Scores: {model_name}', fontsize=12, fontweight='bold')
+    fig.tight_layout()
+
+    plot_path = output_dir / f'{safe_name}_similarity.png'
+    fig.savefig(plot_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    return plot_path
+
+
+def _swap_tanh_to_relu(module):
+    for name, child in module.named_children():
+        if isinstance(child, nn.Tanh):
+            setattr(module, name, nn.ReLU())
+        else:
+            _swap_tanh_to_relu(child)
+
+
+def _apply_activation_override(model, activation_type):
+    activation = str(activation_type).lower()
+    if activation == 'relu':
+        _swap_tanh_to_relu(model)
+    elif activation == 'tanh':
+        return
+    else:
+        raise ValueError(f"Unsupported activation override: {activation_type}")
 
 
 def _apply_forced_inference_target(dataset, forced_target_speaker_id, quiet=False):
@@ -452,7 +554,10 @@ if __name__ == '__main__':
         transform_enrolled_in_reconstruction=TRANSFORM_ENROLLED_DVECTOR_FORSIMSCORE_IN_RECONSTRUCTION,
         transform_enrolled_vadinput_in_reconstruction=TRANSFORM_ENROLLED_VADINPUT_DVECTOR_IN_RECONSTRUCTION,
         recompute_scores=effective_recompute_scores,
-        audio_root=AUDIO_ROOT_OVERRIDE
+        audio_root=AUDIO_ROOT_OVERRIDE,
+        collect_similarity_scores=PLOT_SIMILARITY_SCORES and effective_recompute_scores,
+        similarity_score_sample_step=SIMILARITY_SCORE_SAMPLE_STEP,
+        similarity_score_max_items=SIMILARITY_SCORE_MAX_UTTS,
     )
     
     total_samples = len(test_data)
@@ -510,8 +615,21 @@ if __name__ == '__main__':
             autoencoder, ae_config = load_autoencoder(current_ae_path, device)
             autoencoder = autoencoder.to(device)  # Ensure autoencoder is on the correct device
             autoencoder.eval()
+            model_key = os.path.basename(current_ae_path)
+            override_activation = AE_ACTIVATION_OVERRIDE.get(model_key)
+            if override_activation:
+                _apply_activation_override(autoencoder, override_activation)
+                if not QUIET:
+                    print(f"   🔁 Activation override: {override_activation}")
+            from torchsummary import summary
+            summary(autoencoder, (256,))
             encoded_dim = _get_ae_bottleneck_dim(ae_config)
             ae_model_type = ae_config.get('model_type', 'dvector_autoencoder')
+
+            if ae_model_type == 'greedy_layerwise_stacked' and not use_ae_reconstruction:
+                use_ae_reconstruction = True
+                if not QUIET:
+                    print("   ⚠️  Greedy layer-wise AE has no bottleneck-only mode; forcing reconstruction")
             
             if not QUIET:
                 print(f"\n✅ Autoencoder loaded successfully!")
@@ -526,6 +644,10 @@ if __name__ == '__main__':
                     )
                     print(f"   First block: {first_block_str} (MLP)")
                     print(f"   Refinement blocks: {ae_config.get('stack_refinement_hidden_dims', [1024, 1024])}")
+                    print(f"   Processed dim: {ae_config.get('input_dim', 256)}-dim (linear output)")
+                elif ae_model_type == 'greedy_layerwise_stacked':
+                    print("   Architecture: greedy_layerwise_stacked")
+                    print(f"   Greedy hidden dims: {ae_config.get('greedy_hidden_dims', [])}")
                     print(f"   Processed dim: {ae_config.get('input_dim', 256)}-dim (linear output)")
                 else:
                     print(f"   Architecture: {ae_config['hidden_dims']}")
@@ -564,6 +686,14 @@ if __name__ == '__main__':
         actual_dataset.transform_enrolled_vadinput_in_reconstruction = (
             TRANSFORM_ENROLLED_VADINPUT_DVECTOR_IN_RECONSTRUCTION and use_ae_reconstruction
         )
+        actual_dataset.collect_similarity_scores = (
+            PLOT_SIMILARITY_SCORES and effective_recompute_scores
+        )
+        actual_dataset.similarity_score_sample_step = SIMILARITY_SCORE_SAMPLE_STEP
+        actual_dataset.similarity_score_max_items = SIMILARITY_SCORE_MAX_UTTS
+        actual_dataset.similarity_scores = {}
+        actual_dataset.similarity_scores_by_class = {0: [], 1: [], 2: []}
+        actual_dataset.similarity_score_num_utts = 0
         
         # Reprocess enrolled d-vectors with the new autoencoder
         # Note: When recompute_scores=True, stream d-vectors are processed in __getitem__
@@ -706,6 +836,14 @@ if __name__ == '__main__':
 
         # Export per-model example label files (3 utterances x 3 files)
         model_name = os.path.basename(current_ae_path) if current_ae_path else 'NO_AE'
+        if PLOT_SIMILARITY_SCORES and effective_recompute_scores:
+            plot_path = _plot_similarity_scores(
+                model_name,
+                getattr(actual_dataset, 'similarity_scores_by_class', {}),
+                SIMILARITY_PLOTS_DIR,
+            )
+            if plot_path and not QUIET:
+                print(f"📈 Similarity plot: {plot_path}")
         examples_out_dir = _export_example_label_files(
             example_labels_root,
             model_name,

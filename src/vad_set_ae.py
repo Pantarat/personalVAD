@@ -195,7 +195,23 @@ class VadSETAEDataset(Dataset):
           Enrolled vectors can be independently toggled for scoring anchor and model input
     """
 
-    def __init__(self, root_dir, embed_path, score_type, autoencoder=None, use_autoencoder=True, use_ae_reconstruction=False, max_utterances=None, recompute_scores=False, audio_root=None, transform_enrolled_in_reconstruction=False, transform_enrolled_vadinput_in_reconstruction=False):
+    def __init__(
+        self,
+        root_dir,
+        embed_path,
+        score_type,
+        autoencoder=None,
+        use_autoencoder=True,
+        use_ae_reconstruction=False,
+        max_utterances=None,
+        recompute_scores=False,
+        audio_root=None,
+        transform_enrolled_in_reconstruction=False,
+        transform_enrolled_vadinput_in_reconstruction=False,
+        collect_similarity_scores=False,
+        similarity_score_sample_step=1,
+        similarity_score_max_items=None,
+    ):
         self.root_dir = root_dir
         self.embed_path = embed_path
         self.score_type = score_type
@@ -206,6 +222,12 @@ class VadSETAEDataset(Dataset):
         self.max_utterances = max_utterances
         self.recompute_scores = recompute_scores
         self.audio_root = audio_root
+        self.collect_similarity_scores = bool(collect_similarity_scores)
+        self.similarity_score_sample_step = max(1, int(similarity_score_sample_step))
+        self.similarity_score_max_items = similarity_score_max_items
+        self.similarity_scores = {}
+        self.similarity_scores_by_class = {0: [], 1: [], 2: []}
+        self.similarity_score_num_utts = 0
         
         # Optional forced-inference controls (set externally by eval scripts)
         self.forced_inference_target = None
@@ -424,9 +446,25 @@ class VadSETAEDataset(Dataset):
                 # No autoencoder: use original d-vectors
                 scores_stream = np.array([self.cos(embed, frame_dvec) for frame_dvec in embeds_stream])
                 scores_slices = np.array([self.cos(embed, slice_dvec) for slice_dvec in embeds_slices])
-            
+
             # Generate all three score types (matching extract_features.py exactly)
             n = len(x)  # Number of frames
+
+            if self.collect_similarity_scores:
+                max_items = self.similarity_score_max_items
+                if max_items is None or self.similarity_score_num_utts < max_items:
+                    scores_frame = scores_stream[:n]
+                    indices = np.arange(scores_frame.shape[0])[:: self.similarity_score_sample_step]
+                    sampled_scores = scores_frame[indices].astype(np.float32)
+                    sampled_labels = y[:n][indices]
+
+                    self.similarity_scores[key] = sampled_scores
+                    for cls in (0, 1, 2):
+                        class_scores = sampled_scores[sampled_labels == cls]
+                        if class_scores.size:
+                            self.similarity_scores_by_class[cls].append(class_scores)
+                    self.similarity_score_num_utts += 1
+            
             
             # Type 0: Baseline - frame-level scores
             scores_type0 = scores_stream[:n]

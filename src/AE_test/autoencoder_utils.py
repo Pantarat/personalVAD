@@ -23,6 +23,15 @@ def _make_norm_layer(norm_type, dim):
     raise ValueError(f"Unsupported norm_type: {norm_type}")
 
 
+def _make_activation_layer(activation_type):
+    activation = str(activation_type).lower()
+    if activation == 'tanh':
+        return nn.Tanh()
+    if activation == 'relu':
+        return nn.ReLU()
+    raise ValueError(f"Unsupported activation_type: {activation_type}")
+
+
 def _normalize_hidden_dims(hidden_dims, default_dims):
     """Normalize hidden-dim specs so callers can pass ints, tuples, or lists."""
     if hidden_dims is None:
@@ -101,6 +110,7 @@ class DvectorAutoencoder(nn.Module):
         hidden_dims=None,
         dropout_rate=0.2,
         norm_type='batchnorm',
+        activation_type='tanh',
         use_residual=False,
         residual_scale_init=0.5,
     ):
@@ -114,6 +124,7 @@ class DvectorAutoencoder(nn.Module):
         self.hidden_dims = hidden_dims
         self.dropout_rate = dropout_rate
         self.norm_type = norm_type.lower()
+        self.activation_type = str(activation_type).lower()
         self.use_residual = bool(use_residual)
 
         if self.use_residual:
@@ -130,7 +141,7 @@ class DvectorAutoencoder(nn.Module):
         for i in range(n_encoder_layers):
             encoder_layers.append(nn.Linear(prev_dim, self.hidden_dims[i]))
             encoder_layers.append(_make_norm_layer(self.norm_type, self.hidden_dims[i]))
-            encoder_layers.append(nn.Tanh())
+            encoder_layers.append(_make_activation_layer(self.activation_type))
             encoder_layers.append(nn.Dropout(dropout_rate))
             prev_dim = self.hidden_dims[i]
         
@@ -138,7 +149,7 @@ class DvectorAutoencoder(nn.Module):
         bottleneck_dim = self.hidden_dims[n_encoder_layers]
         encoder_layers.append(nn.Linear(prev_dim, bottleneck_dim))
         encoder_layers.append(_make_norm_layer(self.norm_type, bottleneck_dim))
-        encoder_layers.append(nn.Tanh())
+        encoder_layers.append(_make_activation_layer(self.activation_type))
         
         self.encoder = nn.Sequential(*encoder_layers)
         
@@ -150,7 +161,7 @@ class DvectorAutoencoder(nn.Module):
         for i in range(n_encoder_layers + 1, len(self.hidden_dims)):
             decoder_layers.append(nn.Linear(prev_dim, self.hidden_dims[i]))
             decoder_layers.append(_make_norm_layer(self.norm_type, self.hidden_dims[i]))
-            decoder_layers.append(nn.Tanh())
+            decoder_layers.append(_make_activation_layer(self.activation_type))
             decoder_layers.append(nn.Dropout(dropout_rate))
             prev_dim = self.hidden_dims[i]
         
@@ -187,6 +198,7 @@ class _RefinementMLP(nn.Module):
         hidden_dims=None,
         dropout_rate=0.2,
         norm_type='batchnorm',
+        activation_type='tanh',
     ):
         super().__init__()
 
@@ -198,13 +210,14 @@ class _RefinementMLP(nn.Module):
         self.hidden_dims = [int(v) for v in hidden_dims]
         self.dropout_rate = float(dropout_rate)
         self.norm_type = str(norm_type).lower()
+        self.activation_type = str(activation_type).lower()
 
         layers = []
         prev_dim = self.input_dim
         for hidden_dim in self.hidden_dims:
             layers.append(nn.Linear(prev_dim, hidden_dim))
             layers.append(_make_norm_layer(self.norm_type, hidden_dim))
-            layers.append(nn.Tanh())
+            layers.append(_make_activation_layer(self.activation_type))
             layers.append(nn.Dropout(self.dropout_rate))
             prev_dim = hidden_dim
 
@@ -233,6 +246,7 @@ class DeepStackedDvectorAutoencoder(nn.Module):
         hidden_dims=None,
         dropout_rate=0.2,
         norm_type='batchnorm',
+        activation_type='tanh',
         use_residual=False,
         residual_scale_init=0.5,
         n_stacked_daes=2,
@@ -251,6 +265,7 @@ class DeepStackedDvectorAutoencoder(nn.Module):
         self.hidden_dims = _normalize_hidden_dims(hidden_dims, [128, 64, 128])
         self.dropout_rate = float(dropout_rate)
         self.norm_type = str(norm_type).lower()
+        self.activation_type = str(activation_type).lower()
         self.use_residual = bool(use_residual)
         self.residual_scale_init = float(residual_scale_init)
         self.n_stacked_daes = int(n_stacked_daes)
@@ -272,6 +287,7 @@ class DeepStackedDvectorAutoencoder(nn.Module):
             hidden_dims=self.first_block_hidden_dims,
             dropout_rate=self.dropout_rate,
             norm_type=self.norm_type,
+            activation_type=self.activation_type,
         )
 
         self.refinement_blocks = nn.ModuleList()
@@ -283,6 +299,7 @@ class DeepStackedDvectorAutoencoder(nn.Module):
                     hidden_dims=block_hidden_dims,
                     dropout_rate=self.dropout_rate,
                     norm_type=self.norm_type,
+                    activation_type=self.activation_type,
                 )
             )
 
@@ -304,6 +321,57 @@ class DeepStackedDvectorAutoencoder(nn.Module):
     def decode(self, z):
         """Identity decode for MLP-based architecture (no decoder)."""
         return z
+
+
+class GreedyLayerwiseStackedDvectorAutoencoder(nn.Module):
+    """Stacked autoencoder built from greedy layer-wise pretraining specs."""
+
+    def __init__(
+        self,
+        input_dim=256,
+        greedy_hidden_dims=None,
+        dropout_rate=0.1,
+        norm_type='batchnorm',
+        activation_type='tanh',
+    ):
+        super().__init__()
+
+        greedy_hidden_dims = _normalize_hidden_dims(greedy_hidden_dims, [])
+        if len(greedy_hidden_dims) == 0:
+            raise ValueError("greedy_hidden_dims must be non-empty for greedy_layerwise_stacked")
+
+        self.input_dim = int(input_dim)
+        self.greedy_hidden_dims = list(greedy_hidden_dims)
+        self.dropout_rate = float(dropout_rate)
+        self.norm_type = str(norm_type).lower()
+        self.activation_type = str(activation_type).lower()
+
+        def _norm(dim):
+            return _make_norm_layer(self.norm_type, dim)
+
+        self.encoders = nn.ModuleList()
+        self.decoders = nn.ModuleList()
+
+        prev_dim = self.input_dim
+        for hidden_dim in self.greedy_hidden_dims:
+            self.encoders.append(
+                nn.Sequential(
+                    nn.Linear(prev_dim, hidden_dim),
+                    _norm(hidden_dim),
+                    _make_activation_layer(self.activation_type),
+                    nn.Dropout(self.dropout_rate),
+                )
+            )
+            self.decoders.append(nn.Sequential(nn.Linear(hidden_dim, prev_dim)))
+            prev_dim = hidden_dim
+
+    def forward(self, x):
+        out = x
+        for encoder in self.encoders:
+            out = encoder(out)
+        for decoder in reversed(self.decoders):
+            out = decoder(out)
+        return F.normalize(out, p=2, dim=-1, eps=1e-12)
 
 
 def _extract_state_dict(checkpoint):
@@ -397,40 +465,47 @@ def _resolve_arch_config(config, state_dict):
         model_type = 'deep_stacked_dae'
     elif model_type in ('standard', 'autoencoder', 'dvectorae'):
         model_type = 'dvector_autoencoder'
+    elif model_type in ('greedy_layerwise', 'greedy_layerwise_stacked'):
+        model_type = 'greedy_layerwise_stacked'
 
     input_dim = pick('input_dim')
     hidden_dims = pick('hidden_dims')
     dropout_rate = pick('dropout_rate', 0.2)
     norm_type = pick('norm_type', 'batchnorm')
+    activation_type = pick('activation_type', 'tanh')
     use_residual = pick('use_residual', False)
     residual_scale_init = pick('residual_scale_init', 0.5)
     n_stacked_daes = pick('n_stacked_daes', 1)
     first_block_hidden_dims = pick('first_block_hidden_dims', [])
     stack_refinement_hidden_dims = pick('stack_refinement_hidden_dims', [1024, 1024])
+    greedy_hidden_dims = pick('greedy_hidden_dims', [])
 
     if input_dim is None:
         input_dim = _infer_input_dim_from_state_dict(state_dict)
-    if hidden_dims is None:
+    if hidden_dims is None and model_type != 'greedy_layerwise_stacked':
         hidden_dims = _infer_hidden_dims_from_state_dict(state_dict)
 
     if input_dim is None:
         raise KeyError(
             "Missing 'input_dim' in config and unable to infer from checkpoint state_dict"
         )
-    if hidden_dims is None:
+    if hidden_dims is None and model_type != 'greedy_layerwise_stacked':
         raise KeyError(
             "Missing 'hidden_dims' in config and unable to infer from checkpoint state_dict"
         )
 
     resolved['input_dim'] = int(input_dim)
-    resolved['hidden_dims'] = list(hidden_dims)
+    if hidden_dims is not None:
+        resolved['hidden_dims'] = list(hidden_dims)
     resolved['dropout_rate'] = float(dropout_rate)
     resolved['norm_type'] = str(norm_type)
+    resolved['activation_type'] = str(activation_type)
     resolved['use_residual'] = bool(use_residual)
     resolved['residual_scale_init'] = float(residual_scale_init)
     resolved['model_type'] = model_type
     resolved['n_stacked_daes'] = int(n_stacked_daes)
     resolved['first_block_hidden_dims'] = _normalize_hidden_dims(first_block_hidden_dims, [])
+    resolved['greedy_hidden_dims'] = _normalize_hidden_dims(greedy_hidden_dims, [])
     resolved['stack_refinement_hidden_dims'] = _normalize_stack_refinement_hidden_dims(
         stack_refinement_hidden_dims,
         n_refinement_blocks=max(0, resolved['n_stacked_daes'] - 1),
@@ -450,6 +525,7 @@ def _build_autoencoder_from_config(config):
             hidden_dims=config['hidden_dims'],
             dropout_rate=config.get('dropout_rate', 0.2),
             norm_type=config.get('norm_type', 'batchnorm'),
+            activation_type=config.get('activation_type', 'tanh'),
             use_residual=config.get('use_residual', False),
             residual_scale_init=config.get('residual_scale_init', 0.5),
             n_stacked_daes=config.get('n_stacked_daes', 2),
@@ -463,8 +539,18 @@ def _build_autoencoder_from_config(config):
             hidden_dims=config['hidden_dims'],
             dropout_rate=config.get('dropout_rate', 0.2),
             norm_type=config.get('norm_type', 'batchnorm'),
+            activation_type=config.get('activation_type', 'tanh'),
             use_residual=config.get('use_residual', False),
             residual_scale_init=config.get('residual_scale_init', 0.5),
+        )
+
+    if model_type == 'greedy_layerwise_stacked':
+        return GreedyLayerwiseStackedDvectorAutoencoder(
+            input_dim=config['input_dim'],
+            greedy_hidden_dims=config.get('greedy_hidden_dims', []),
+            dropout_rate=config.get('dropout_rate', 0.1),
+            norm_type=config.get('norm_type', 'batchnorm'),
+            activation_type=config.get('activation_type', 'tanh'),
         )
 
     raise ValueError(f"Unsupported model_type in config: {model_type}")
@@ -545,7 +631,8 @@ def load_autoencoder(model_path, config_path=None, device='cuda'):
     model.eval()
     
     print(f"✓ Autoencoder loaded successfully")
-    if config.get('model_type', 'dvector_autoencoder') == 'deep_stacked_dae':
+    model_type = config.get('model_type', 'dvector_autoencoder')
+    if model_type == 'deep_stacked_dae':
         first_block_hidden_dims = config.get('first_block_hidden_dims', [])
         if first_block_hidden_dims:
             first_block_str = f"{config['input_dim']} -> {first_block_hidden_dims} -> {config['input_dim']}"
@@ -557,9 +644,14 @@ def load_autoencoder(model_path, config_path=None, device='cuda'):
         print(f"  First block: {first_block_str} (MLP)")
         print(f"  Refinement hidden dims: {config.get('stack_refinement_hidden_dims', [1024, 1024])}")
         print(f"  Processed dim: {config['input_dim']}-dim (linear output)")
+    elif model_type == 'greedy_layerwise_stacked':
+        print("  Architecture: greedy_layerwise_stacked")
+        print(f"  Greedy hidden dims: {config.get('greedy_hidden_dims', [])}")
+        print(f"  Processed dim: {config['input_dim']}-dim (linear output)")
     else:
         print(f"  Architecture: {config['input_dim']} -> {config['hidden_dims']} -> {config['input_dim']}")
     print(f"  Norm: {config.get('norm_type', 'batchnorm')}, Residual: {config.get('use_residual', False)}")
+    print(f"  Activation: {config.get('activation_type', 'tanh')}")
 
     if return_with_config:
         return model, config
@@ -610,7 +702,8 @@ def load_autoencoder_with_config(model_path, config_path, device='cuda'):
     model.eval()
     
     print(f"✓ Autoencoder loaded successfully")
-    if config.get('model_type', 'dvector_autoencoder') == 'deep_stacked_dae':
+    model_type = config.get('model_type', 'dvector_autoencoder')
+    if model_type == 'deep_stacked_dae':
         first_block_hidden_dims = config.get('first_block_hidden_dims', [])
         if first_block_hidden_dims:
             first_block_str = f"{config['input_dim']} -> {first_block_hidden_dims} -> {config['input_dim']}"
@@ -622,9 +715,14 @@ def load_autoencoder_with_config(model_path, config_path, device='cuda'):
         print(f"  First block: {first_block_str} (MLP)")
         print(f"  Refinement hidden dims: {config.get('stack_refinement_hidden_dims', [1024, 1024])}")
         print(f"  Processed dim: {config['input_dim']}-dim (linear output)")
+    elif model_type == 'greedy_layerwise_stacked':
+        print("  Architecture: greedy_layerwise_stacked")
+        print(f"  Greedy hidden dims: {config.get('greedy_hidden_dims', [])}")
+        print(f"  Processed dim: {config['input_dim']}-dim (linear output)")
     else:
         print(f"  Architecture: {config['input_dim']} -> {config['hidden_dims']} -> {config['input_dim']}")
     print(f"  Norm: {config.get('norm_type', 'batchnorm')}, Residual: {config.get('use_residual', False)}")
+    print(f"  Activation: {config.get('activation_type', 'tanh')}")
     
     return model, config
 
