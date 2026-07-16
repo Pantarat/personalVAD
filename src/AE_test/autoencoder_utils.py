@@ -445,6 +445,29 @@ def _infer_hidden_dims_from_state_dict(state_dict):
     return hidden_dims
 
 
+def _infer_greedy_hidden_dims_from_state_dict(state_dict):
+    """Infer greedy hidden dims from encoders.{i}.0.weight tensors."""
+    encoders = []
+    for key, tensor in state_dict.items():
+        if not key.startswith('encoders.'):
+            continue
+        if not key.endswith('.weight'):
+            continue
+        parts = key.split('.')
+        if len(parts) < 3 or not parts[1].isdigit():
+            continue
+        idx = int(parts[1])
+        if not isinstance(tensor, torch.Tensor) or tensor.ndim != 2:
+            continue
+        encoders.append((idx, int(tensor.shape[0])))
+
+    if not encoders:
+        return []
+
+    encoders.sort(key=lambda x: x[0])
+    return [out_dim for _, out_dim in encoders]
+
+
 def _resolve_arch_config(config, state_dict):
     """Resolve architecture keys, including intermediate-finetune nested config fallback."""
     resolved = dict(config) if isinstance(config, dict) else {}
@@ -461,6 +484,8 @@ def _resolve_arch_config(config, state_dict):
         return default
 
     model_type = str(pick('model_type', 'dvector_autoencoder')).lower()
+    if any(k.startswith('encoders.') for k in state_dict.keys()):
+        model_type = 'greedy_layerwise_stacked'
     if model_type in ('deepstackeddae', 'deep_stacked', 'deep_stacked_dae'):
         model_type = 'deep_stacked_dae'
     elif model_type in ('standard', 'autoencoder', 'dvectorae'):
@@ -479,6 +504,11 @@ def _resolve_arch_config(config, state_dict):
     first_block_hidden_dims = pick('first_block_hidden_dims', [])
     stack_refinement_hidden_dims = pick('stack_refinement_hidden_dims', [1024, 1024])
     greedy_hidden_dims = pick('greedy_hidden_dims', [])
+
+    if model_type == 'greedy_layerwise_stacked' and not greedy_hidden_dims:
+        greedy_hidden_dims = _infer_greedy_hidden_dims_from_state_dict(state_dict)
+        if not greedy_hidden_dims:
+            greedy_hidden_dims = _infer_hidden_dims_from_state_dict(state_dict) or []
 
     if input_dim is None:
         input_dim = _infer_input_dim_from_state_dict(state_dict)

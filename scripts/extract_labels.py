@@ -21,9 +21,9 @@ import numpy as np
 # ================ CONFIGURATION - EDIT HERE =========================
 
 # Default paths
-LABELS_SCP = "data/84_ov_test_ov100pct_main84_babble_100_new/labels.scp"
+LABELS_SCP = "data/61_ov_test_noOther_main61_500_31-5-2026/labels.scp"
 OUTPUT_DIR = "data/extracted_labels/"
-TARGET_UTT = "84_chunk_00001_OV_2961-960-0014-babble"  # Set to specific utt_id or None to extract all
+TARGET_UTT = "61_chunk_00001_OV_none"  # Set to specific utt_id or None to extract all
 FRAME_SHIFT = 0.01  # seconds (10ms frames)
 LABEL_TYPE = "multiclass"  # Options: 'binary' (0/1), 'multiclass' (0/1/2), 'auto' (detect from data)
 

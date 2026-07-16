@@ -59,6 +59,103 @@ def get_speech_ranges(aligned_text, stamps):
     return speech_ranges
 
 
+def merge_speech_ranges(speech_ranges, max_gap=0.03):
+    """
+    Merge adjacent or near-adjacent speech segments into longer runs.
+
+    Single-speaker datasets often carry frame-level labels, which can produce
+    thousands of tiny contiguous speech spans. We merge those back into natural
+    runs before rearranging silence so the waveform itself is preserved.
+    """
+    if not speech_ranges:
+        return []
+
+    merged = [tuple(speech_ranges[0])]
+    for start, end in speech_ranges[1:]:
+        last_start, last_end = merged[-1]
+        if start <= last_end + max_gap:
+            merged[-1] = (last_start, max(last_end, end))
+        else:
+            merged.append((start, end))
+
+    return merged
+
+
+def remix_silence(audio, speech_ranges, sr):
+    """
+    Redistribute an utterance's silence while preserving speech content/order.
+
+    This is used to synthesize extra target-only variants when we need more
+    samples than there are unique source utterances.
+    """
+    if not speech_ranges:
+        return np.asarray(audio, dtype=np.float32), []
+
+    total_samples = len(audio)
+    audio = np.asarray(audio, dtype=np.float32)
+    sorted_ranges = merge_speech_ranges(sorted(speech_ranges))
+
+    speech_chunks = []
+    speech_sample_ranges = []
+    total_speech_samples = 0
+
+    for start, end in sorted_ranges:
+        start_sample = max(0, min(total_samples, int(round(start * sr))))
+        end_sample = max(start_sample, min(total_samples, int(round(end * sr))))
+        if end_sample <= start_sample:
+            continue
+
+        speech_chunk = audio[start_sample:end_sample].copy()
+        speech_chunks.append(speech_chunk)
+        speech_sample_ranges.append((start_sample, end_sample))
+        total_speech_samples += speech_chunk.size
+
+    if not speech_chunks:
+        return audio, []
+
+    total_silence_samples = max(0, total_samples - total_speech_samples)
+    if total_silence_samples == 0:
+        remixed_ranges = [(start / sr, end / sr) for start, end in speech_sample_ranges]
+        return audio.copy(), remixed_ranges
+
+    silence_slot_count = len(speech_chunks) + 1
+    silence_weights = np.random.dirichlet(np.ones(silence_slot_count))
+    silence_samples = np.floor(silence_weights * total_silence_samples).astype(int)
+
+    remainder = total_silence_samples - int(silence_samples.sum())
+    if remainder > 0:
+        for idx in np.random.permutation(silence_slot_count)[:remainder]:
+            silence_samples[idx] += 1
+
+    remixed_pieces = []
+    remixed_ranges = []
+    cursor = 0
+
+    for idx, speech_chunk in enumerate(speech_chunks):
+        cur_silence = int(silence_samples[idx])
+        if cur_silence > 0:
+            remixed_pieces.append(np.zeros(cur_silence, dtype=np.float32))
+            cursor += cur_silence
+
+        remixed_pieces.append(speech_chunk)
+        speech_end = cursor + speech_chunk.size
+        remixed_ranges.append((cursor / sr, speech_end / sr))
+        cursor = speech_end
+
+    trailing_silence = int(silence_samples[-1])
+    if trailing_silence > 0:
+        remixed_pieces.append(np.zeros(trailing_silence, dtype=np.float32))
+
+    remixed_audio = np.concatenate(remixed_pieces) if remixed_pieces else np.zeros(total_samples, dtype=np.float32)
+
+    if remixed_audio.size < total_samples:
+        remixed_audio = np.pad(remixed_audio, (0, total_samples - remixed_audio.size))
+    elif remixed_audio.size > total_samples:
+        remixed_audio = remixed_audio[:total_samples]
+
+    return remixed_audio.astype(np.float32, copy=False), remixed_ranges
+
+
 def load_single_speaker_dataset(dataset_dir, speaker_id, max_utterances=None):
     """
     Load utterances from a single speaker dataset (created by extract_single_speaker.py).
@@ -255,7 +352,8 @@ def load_speaker_utterances(libri_root, speaker_id, available_sets=None):
 def generate_overlapping_utterances(libri_root, dest, n, overlap_pct=50.0, 
                                    amplitude_ratio=1.0, wav_scp_prefix='', 
                                    sets=None, base_speakers=None, no_target_speaker=False,
-                                   single_speaker_datasets=None, single_speaker_count=None):
+                                   single_speaker_datasets=None, single_speaker_count=None,
+                                   single_speaker_only=False):
     """
     Generate overlapping utterances with simple logic.
     
@@ -271,7 +369,12 @@ def generate_overlapping_utterances(libri_root, dest, n, overlap_pct=50.0,
         no_target_speaker: If True, all speakers are non-target (no 'T' labels)
         single_speaker_datasets: List of paths to single speaker dataset directories
         single_speaker_count: Optional max number of utterances to use from EACH single speaker dataset
+        single_speaker_only: If True, generate target-only samples (no overlap or non-target speech)
     """
+    if single_speaker_only and no_target_speaker:
+        print("Warning: --single-speaker-only overrides --no-target-speaker; generating target-only samples")
+        no_target_speaker = False
+
     if sets is None:
         sets = ['train-clean-100']
     
@@ -337,7 +440,10 @@ def generate_overlapping_utterances(libri_root, dest, n, overlap_pct=50.0,
     
     print(f"Loaded {len(dataset)} speakers with utterances")
     
-    if len(dataset) < 2:
+    if len(dataset) < 1 and not single_speaker_datasets and not base_speakers:
+        print("Error: Need at least 1 speaker in dataset")
+        return set()
+    if not single_speaker_only and len(dataset) < 2 and not single_speaker_datasets and not base_speakers:
         print("Error: Need at least 2 speakers in dataset")
         return set()
     
@@ -577,6 +683,7 @@ def generate_overlapping_utterances(libri_root, dest, n, overlap_pct=50.0,
         
         # Load target audio
         target_audio, sr = sf.read(target_audio_path)
+        target_audio = np.asarray(target_audio, dtype=np.float32)
         assert sr == 16000, f"Invalid sample rate {sr}"
         
         # Get target speech ranges
@@ -597,127 +704,141 @@ def generate_overlapping_utterances(libri_root, dest, n, overlap_pct=50.0,
         if target_speech_duration == 0:
             print(f"Warning: Target utterance {target_id} has no speech, skipping...")
             continue
-        
-        # Select non-target speaker
-        non_target_speakers = [s for s in dataset if s[0] != current_speaker_id]
-        if not non_target_speakers:
-            print("No non-target speakers available, skipping...")
-            continue
-        
-        overlap_speaker = random.choice(non_target_speakers)
-        if not overlap_speaker[1]:
-            print("No utterances for overlap speaker, skipping...")
-            continue
-        
-        overlap_utt = random.choice(overlap_speaker[1])
-        overlap_speaker[1].remove(overlap_utt)
-        
-        overlap_audio_path, overlap_id, overlap_aligned_text, overlap_stamps, overlap_transcript = overlap_utt
-        overlap_speaker_id = overlap_speaker[0]
-        
-        # Load overlap audio
-        overlap_audio, sr_ov = sf.read(overlap_audio_path)
-        assert sr_ov == 16000, f"Invalid sample rate {sr_ov}"
-        
-        # Get overlap speech ranges
-        overlap_stamps_list = overlap_stamps.split(',')
-        overlap_speech_ranges = get_speech_ranges(overlap_aligned_text, overlap_stamps_list)
-        
-        # Calculate total target speech duration
+
         target_duration = target_audio.size / sr
-        overlap_duration = overlap_audio.size / sr
-        
-        # Add standalone non-target speech utterances to fill silence gaps
-        # This ensures we have roughly equal amounts of overlapped and standalone non-target speech
-        standalone_utts = []
-        standalone_speech_ranges = []
-        
-        # Calculate how much standalone non-target speech we need
-        # For 50% overlap, we want approximately equal non-target speech (overlapped + standalone)
-        target_speech_duration_total = sum(end - start for start, end in target_speech_ranges)
-        desired_standalone_duration = target_speech_duration_total * (overlap_pct / 100.0)
-        
-        # Collect standalone non-target utterances
-        current_standalone_duration = 0.0
-        while current_standalone_duration < desired_standalone_duration:
-            if not non_target_speakers:
-                break
-                
-            standalone_speaker = random.choice(non_target_speakers)
-            if not standalone_speaker[1]:
-                non_target_speakers.remove(standalone_speaker)
-                continue
-                
-            standalone_utt = random.choice(standalone_speaker[1])
-            standalone_speaker[1].remove(standalone_utt)
-            
-            sa_audio_path, sa_id, sa_aligned_text, sa_stamps, sa_transcript = standalone_utt
-            sa_audio, sa_sr = sf.read(sa_audio_path)
-            assert sa_sr == 16000, f"Invalid sample rate {sa_sr}"
-            
-            sa_duration = sa_audio.size / sr
-            sa_stamps_list = sa_stamps.split(',')
-            sa_speech_ranges = get_speech_ranges(sa_aligned_text, sa_stamps_list)
-            
-            standalone_utts.append((sa_audio, sa_speech_ranges, sa_duration, sa_id))
-            current_standalone_duration += sum(end - start for start, end in sa_speech_ranges)
-        
-        # Position overlap utterance to achieve desired overlap percentage
-        if overlap_pct == 0:
-            # For 0% overlap: place in silence/gaps
-            overlap_start_time = target_duration + 0.5
-        elif target_speech_ranges:
-            # Position to overlap with target speech
-            target_speech_start = target_speech_ranges[0][0]
-            target_speech_end = target_speech_ranges[-1][1]
-            target_speech_span = target_speech_end - target_speech_start
-            
-            max_start = max(0, target_speech_span - overlap_duration * 0.3)
-            overlap_start_time = target_speech_start + random.uniform(0, max(0.1, max_start))
-        else:
-            overlap_start_time = 0.0
-        
-        overlap_end_time = overlap_start_time + overlap_duration
-        
-        # Position standalone utterances in available gaps/silence
-        # Find silence regions in target speech
-        silence_regions = []
-        if target_speech_ranges:
-            if target_speech_ranges[0][0] > 0.5:
-                silence_regions.append((0, target_speech_ranges[0][0]))
-            
-            for i in range(len(target_speech_ranges) - 1):
-                gap_start = target_speech_ranges[i][1]
-                gap_end = target_speech_ranges[i + 1][0]
-                if gap_end - gap_start > 0.3:
-                    silence_regions.append((gap_start, gap_end))
-            
-            silence_regions.append((target_speech_ranges[-1][1], target_duration + 10.0))
-        else:
-            silence_regions.append((0, target_duration + 10.0))
-        
-        # Place standalone utterances
+
+        if single_speaker_only:
+            target_audio, target_speech_ranges = remix_silence(target_audio, target_speech_ranges, sr)
+            target_duration = target_audio.size / sr
+
         positioned_standalone = []
-        for sa_audio, sa_ranges, sa_duration, sa_id in standalone_utts:
-            # Find suitable gap
-            placed = False
-            random.shuffle(silence_regions)
+        if single_speaker_only:
+            overlap_id = "none"
+            overlap_speaker_id = "none"
+            overlap_audio = np.zeros(0, dtype=np.float32)
+            overlap_duration = 0.0
+            overlap_speech_ranges = []
+            overlap_start_time = 0.0
+            overlap_end_time = 0.0
+        else:
+            # Select non-target speaker
+            non_target_speakers = [s for s in dataset if s[0] != current_speaker_id]
+            if not non_target_speakers:
+                print("No non-target speakers available, skipping...")
+                continue
             
-            for gap_start, gap_end in silence_regions:
-                if gap_end - gap_start >= sa_duration:
-                    # Place in this gap
-                    sa_start = gap_start + random.uniform(0, min(1.0, gap_end - gap_start - sa_duration))
-                    positioned_standalone.append((sa_audio, sa_ranges, sa_start, sa_duration, sa_id))
-                    placed = True
+            overlap_speaker = random.choice(non_target_speakers)
+            if not overlap_speaker[1]:
+                print("No utterances for overlap speaker, skipping...")
+                continue
+            
+            overlap_utt = random.choice(overlap_speaker[1])
+            overlap_speaker[1].remove(overlap_utt)
+            
+            overlap_audio_path, overlap_id, overlap_aligned_text, overlap_stamps, overlap_transcript = overlap_utt
+            overlap_speaker_id = overlap_speaker[0]
+            
+            # Load overlap audio
+            overlap_audio, sr_ov = sf.read(overlap_audio_path)
+            assert sr_ov == 16000, f"Invalid sample rate {sr_ov}"
+            
+            # Get overlap speech ranges
+            overlap_stamps_list = overlap_stamps.split(',')
+            overlap_speech_ranges = get_speech_ranges(overlap_aligned_text, overlap_stamps_list)
+            
+            # Calculate total target speech duration
+            overlap_duration = overlap_audio.size / sr
+            
+            # Add standalone non-target speech utterances to fill silence gaps
+            # This ensures we have roughly equal amounts of overlapped and standalone non-target speech
+            standalone_utts = []
+            standalone_speech_ranges = []
+            
+            # Calculate how much standalone non-target speech we need
+            # For 50% overlap, we want approximately equal non-target speech (overlapped + standalone)
+            target_speech_duration_total = sum(end - start for start, end in target_speech_ranges)
+            desired_standalone_duration = target_speech_duration_total * (overlap_pct / 100.0)
+            
+            # Collect standalone non-target utterances
+            current_standalone_duration = 0.0
+            while current_standalone_duration < desired_standalone_duration:
+                if not non_target_speakers:
                     break
+                    
+                standalone_speaker = random.choice(non_target_speakers)
+                if not standalone_speaker[1]:
+                    non_target_speakers.remove(standalone_speaker)
+                    continue
+                    
+                standalone_utt = random.choice(standalone_speaker[1])
+                standalone_speaker[1].remove(standalone_utt)
+                
+                sa_audio_path, sa_id, sa_aligned_text, sa_stamps, sa_transcript = standalone_utt
+                sa_audio, sa_sr = sf.read(sa_audio_path)
+                assert sa_sr == 16000, f"Invalid sample rate {sa_sr}"
+                
+                sa_duration = sa_audio.size / sr
+                sa_stamps_list = sa_stamps.split(',')
+                sa_speech_ranges = get_speech_ranges(sa_aligned_text, sa_stamps_list)
+                
+                standalone_utts.append((sa_audio, sa_speech_ranges, sa_duration, sa_id))
+                current_standalone_duration += sum(end - start for start, end in sa_speech_ranges)
             
-            if not placed:
-                # Place after everything else
-                last_time = max(target_duration, overlap_end_time)
-                if positioned_standalone:
-                    last_time = max(last_time, max(s[2] + s[3] for s in positioned_standalone))
-                sa_start = last_time + random.uniform(0.1, 0.5)
-                positioned_standalone.append((sa_audio, sa_ranges, sa_start, sa_duration, sa_id))
+            # Position overlap utterance to achieve desired overlap percentage
+            if overlap_pct == 0:
+                # For 0% overlap: place in silence/gaps
+                overlap_start_time = target_duration + 0.5
+            elif target_speech_ranges:
+                # Position to overlap with target speech
+                target_speech_start = target_speech_ranges[0][0]
+                target_speech_end = target_speech_ranges[-1][1]
+                target_speech_span = target_speech_end - target_speech_start
+                
+                max_start = max(0, target_speech_span - overlap_duration * 0.3)
+                overlap_start_time = target_speech_start + random.uniform(0, max(0.1, max_start))
+            else:
+                overlap_start_time = 0.0
+            
+            overlap_end_time = overlap_start_time + overlap_duration
+            
+            # Position standalone utterances in available gaps/silence
+            # Find silence regions in target speech
+            silence_regions = []
+            if target_speech_ranges:
+                if target_speech_ranges[0][0] > 0.5:
+                    silence_regions.append((0, target_speech_ranges[0][0]))
+                
+                for i in range(len(target_speech_ranges) - 1):
+                    gap_start = target_speech_ranges[i][1]
+                    gap_end = target_speech_ranges[i + 1][0]
+                    if gap_end - gap_start > 0.3:
+                        silence_regions.append((gap_start, gap_end))
+                
+                silence_regions.append((target_speech_ranges[-1][1], target_duration + 10.0))
+            else:
+                silence_regions.append((0, target_duration + 10.0))
+            
+            # Place standalone utterances
+            for sa_audio, sa_ranges, sa_duration, sa_id in standalone_utts:
+                # Find suitable gap
+                placed = False
+                random.shuffle(silence_regions)
+                
+                for gap_start, gap_end in silence_regions:
+                    if gap_end - gap_start >= sa_duration:
+                        # Place in this gap
+                        sa_start = gap_start + random.uniform(0, min(1.0, gap_end - gap_start - sa_duration))
+                        positioned_standalone.append((sa_audio, sa_ranges, sa_start, sa_duration, sa_id))
+                        placed = True
+                        break
+                
+                if not placed:
+                    # Place after everything else
+                    last_time = max(target_duration, overlap_end_time)
+                    if positioned_standalone:
+                        last_time = max(last_time, max(s[2] + s[3] for s in positioned_standalone))
+                    sa_start = last_time + random.uniform(0.1, 0.5)
+                    positioned_standalone.append((sa_audio, sa_ranges, sa_start, sa_duration, sa_id))
         
         # Calculate total duration needed
         max_end_time = target_duration
@@ -1046,18 +1167,25 @@ def generate_overlapping_utterances(libri_root, dest, n, overlap_pct=50.0,
                 # Too many labels - shouldn't happen, but truncate
                 filtered_labels = filtered_labels[:len(filtered_timestamps)-1]
         
-        # Generate filename
-        file_name = f"{target_id}_OV_{overlap_id}"
+        # Generate a unique filename so reused source utterances do not overwrite
+        # earlier single-speaker-only variants.
+        file_name = f"{target_id}_OV_{overlap_id}_{iteration:05d}"
         
         # Save audio
         audio_file = os.path.join(cur_dir, f"{file_name}.flac")
         sf.write(audio_file, final_audio, sr)
         
         # Write to output files
-        if FLAC:
-            wav_scp.write(f"{file_name} flac -d -c -s {wav_scp_prefix}{scp_path}{file_name}.flac |\n")
+        wav_scp_relpath = os.path.join(scp_path, f"{file_name}.flac").replace('\\', '/')
+        if wav_scp_prefix:
+            wav_scp_audio_path = os.path.join(wav_scp_prefix, wav_scp_relpath).replace('\\', '/')
         else:
-            wav_scp.write(f"{file_name} sox {wav_scp_prefix}{scp_path}{file_name}.flac -b 16 -e signed -c 1 -t wav - |\n")
+            wav_scp_audio_path = wav_scp_relpath
+
+        if FLAC:
+            wav_scp.write(f"{file_name} flac -d -c -s {wav_scp_audio_path} |\n")
+        else:
+            wav_scp.write(f"{file_name} sox {wav_scp_audio_path} -b 16 -e signed -c 1 -t wav - |\n")
         
         utt2spk.write(f"{file_name} {current_speaker_id}\n")
         
@@ -1202,6 +1330,8 @@ if __name__ == '__main__':
                        help="Maximum number of utterances to use from EACH single speaker dataset (0=all)")
     parser.add_argument('--no-target-speaker', action='store_true',
                        help="Generate samples with NO target speakers (all speech labeled as non-target)")
+    parser.add_argument('--single-speaker-only', action='store_true',
+                       help="Generate target-only samples (no overlap or non-target speech)")
     parser.add_argument('parts', type=str, nargs='*',
                        help="LibriSpeech subsets to use (default: train-clean-100)")
     
@@ -1220,5 +1350,6 @@ if __name__ == '__main__':
         base_speakers=args.base_speaker,
         no_target_speaker=args.no_target_speaker,
         single_speaker_datasets=args.single_speaker_datasets,
-        single_speaker_count=args.single_speaker_count
+        single_speaker_count=args.single_speaker_count,
+        single_speaker_only=args.single_speaker_only
     )

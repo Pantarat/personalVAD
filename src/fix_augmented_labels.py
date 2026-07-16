@@ -16,6 +16,7 @@ Usage:
 
 import argparse
 import os
+import re
 import sys
 
 def load_text_dict(text_file):
@@ -50,11 +51,10 @@ def get_base_utt_id(utt_id):
         84-121550-0000_OV_174-50561-0029-noise -> 84-121550-0000_OV_174-50561-0029
         84-121550-0000_OV_174-50561-0029 -> 84-121550-0000_OV_174-50561-0029 (no change)
     """
-    # Check for known suffixes
-    suffixes = ['-reverb', '-noise', '-music', '-babble']
-    for suffix in suffixes:
-        if utt_id.endswith(suffix):
-            return utt_id[:-len(suffix)]
+    # Check for known suffixes with optional numeric variants
+    match = re.match(r"^(.*)-(reverb|noise|music|babble)\d*$", utt_id)
+    if match:
+        return match.group(1)
     return utt_id
 
 def main():

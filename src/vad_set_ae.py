@@ -279,6 +279,8 @@ class VadSETAEDataset(Dataset):
         self.labels = kaldiio.load_scp(f'{self.root_dir}/labels.scp')
         self.keys = np.array(list(self.fbanks)) # get all the keys
         
+        # print("WAV", list(self.wavs)[0])
+        # print("KEY", list(self.keys)[0])
         # Filter out keys with missing/corrupted audio files if recomputing scores
         if self.recompute_scores:
             valid_keys = []

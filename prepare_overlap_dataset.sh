@@ -20,7 +20,7 @@
 
 # Overlap-specific settings
 USE_OVERLAP=true
-OVERLAP_PERCENTAGE=100  # 0-100: percentage of TARGET SPEAKER SPEECH with overlap (excludes silence)
+OVERLAP_PERCENTAGE=0  # 0-100: percentage of TARGET SPEAKER SPEECH with overlap (excludes silence)
                         # E.g., 50 means half of target speaker's speech has other speakers talking over it
 OVERLAP_AMPLITUDE=1  # 0-1: amplitude ratio of overlapped speech relative to main speaker
 
@@ -42,7 +42,7 @@ OVERLAP_AMPLITUDE=1  # 0-1: amplitude ratio of overlapped speech relative to mai
 #     "data/speaker_84/train3"
 # )
 SINGLE_SPEAKER_DATASETS=(
-    "data/speaker_5105/test"
+    "data/speaker_908/test"
 )
 
 # Number of utterances to use from EACH single speaker dataset
@@ -53,21 +53,25 @@ SINGLE_SPEAKER_UTT_COUNT=0  # Example: 100 to use 100 utterances per dataset
 # Base speaker option (NEW FEATURE)
 # Set to a speaker ID (e.g., "84") to have that speaker as the target in ALL overlaps
 # Leave empty or set to "" for random speaker selection (original behavior)
-BASE_SPEAKER="5105"  # Example: BASE_SPEAKER="84"
+BASE_SPEAKER="908"  # Example: BASE_SPEAKER="84"
 
 # No target speaker option
 # Set to true to generate samples with NO target speakers (all speakers are non-target)
 # When enabled, all speech will be labeled as 'N' (non-target), no 'T' labels
 NO_TARGET_SPEAKER=false
 
+# Single speaker only option
+# Set to true to generate samples with ONLY the target speaker (no overlap, no non-target speech)
+SINGLE_SPEAKER_ONLY=false
+
 # Standard data-prep flags
-AUGMENT=true
+AUGMENT=true  # Whether to run augmentation (reverberation, MUSAN) in Kaldi
 repo_root=$PWD
 KALDI=$repo_root/kaldi
 nj_features=4
 utt_count=500
 kaldi_root=$repo_root/kaldi/egs/pvad
-feature_dir_name=5105_ov_test_ov100pct_main8463_babble_500_9-4-2026
+feature_dir_name=908_ov_test_ov0pct_main908_babble_500_3-6-2026
 
 # LibriSpeech folders (space-separated list)
 libri_folders="test-clean test-other"
@@ -130,7 +134,23 @@ if [ $stage -le 0 ]; then
   echo "${green}Generating MIXED multi-speaker utterances...${reset}"
   echo "${green}================================================${reset}"
   echo "${yellow}Settings:${reset}"
-  if [ "$NO_TARGET_SPEAKER" = true ]; then
+  if [ "$SINGLE_SPEAKER_ONLY" = true ]; then
+    echo "${yellow}  - Mode: SINGLE SPEAKER ONLY (no overlap, no non-target speech)${reset}"
+    if [ ${#SINGLE_SPEAKER_DATASETS[@]} -gt 0 ]; then
+      echo "${yellow}  - Using ${#SINGLE_SPEAKER_DATASETS[@]} single speaker dataset(s):${reset}"
+      for dataset in "${SINGLE_SPEAKER_DATASETS[@]}"; do
+        echo "${yellow}      - ${dataset}${reset}"
+      done
+      echo "${yellow}  - These datasets' chunks will be the target speaker(s)${reset}"
+      if [ "$SINGLE_SPEAKER_UTT_COUNT" -gt 0 ]; then
+        echo "${yellow}  - Using ${SINGLE_SPEAKER_UTT_COUNT} utterances per dataset${reset}"
+      fi
+    elif [ -n "$BASE_SPEAKER" ]; then
+      echo "${yellow}  - Base speaker (target in all samples): ${BASE_SPEAKER}${reset}"
+    else
+      echo "${yellow}  - Target speaker: Random selection${reset}"
+    fi
+  elif [ "$NO_TARGET_SPEAKER" = true ]; then
     if [ -n "$SINGLE_SPEAKER_DATASET" ]; then
       echo "${yellow}  - Mode: NO TARGET SPEAKERS (all speech is non-target)${reset}"
       echo "${yellow}  - Single speaker dataset ${SINGLE_SPEAKER_DATASET} in metadata ONLY${reset}"
@@ -160,9 +180,14 @@ if [ $stage -le 0 ]; then
   echo "${yellow}  - Source datasets: ${libri_folders}${reset}"
   echo ""
   echo "${yellow}Generated audio will contain:${reset}"
-  echo "${yellow}  1. Target speaker speech (TSS)${reset}"
-  echo "${yellow}  2. Overlapping speech (other speakers talking over target)${reset}"
-  echo "${yellow}  3. Standalone non-target speech (other speakers in gaps/silence)${reset}"
+  if [ "$SINGLE_SPEAKER_ONLY" = true ]; then
+    echo "${yellow}  1. Target speaker speech (TSS)${reset}"
+    echo "${yellow}  2. Silence${reset}"
+  else
+    echo "${yellow}  1. Target speaker speech (TSS)${reset}"
+    echo "${yellow}  2. Overlapping speech (other speakers talking over target)${reset}"
+    echo "${yellow}  3. Standalone non-target speech (other speakers in gaps/silence)${reset}"
+  fi
   echo ""
 
   # Build command with optional parameters
@@ -186,16 +211,27 @@ if [ $stage -le 0 ]; then
     no_target_arg="--no-target-speaker"
   fi
 
+  single_speaker_only_arg=""
+  if [ "$SINGLE_SPEAKER_ONLY" = true ]; then
+    single_speaker_only_arg="--single-speaker-only"
+  fi
+
+  scp_prefix="$concat_dir/"
+  if [ "$AUGMENT" = true ]; then
+    scp_prefix="$concat_dir/"
+  fi
+
   eval python src/generate_overlapping_utterances.py \
     --libri_root data/LibriSpeech \
     --concat_dir $concat_dir \
     --count $utt_count \
     --overlap_pct $OVERLAP_PERCENTAGE \
     --amplitude_ratio $OVERLAP_AMPLITUDE \
-    --scp_prefix $concat_dir/ \
+    --scp_prefix "$scp_prefix" \
     $base_speaker_arg \
     $single_speaker_arg \
     $no_target_arg \
+    $single_speaker_only_arg \
     $libri_folders || { 
       echo "${red}Overlap utterance generation failed. Exiting...${reset}"
       exit 1
@@ -221,7 +257,11 @@ if [ "$AUGMENT" = true ]; then
     cd $kaldi_root
 
     echo "${green}Running reverberation and augmentation...${reset}"
-    bash ./reverberate_augment.sh 0
+    if [ "$SINGLE_SPEAKER_ONLY" = true ]; then
+      AUGMENT_TARGET_UTT_COUNT=$utt_count bash ./reverberate_augment.sh 0
+    else
+      bash ./reverberate_augment.sh 0
+    fi
     cd $repo_root
   fi
 fi
@@ -240,7 +280,7 @@ if [ $stage -le 3 ]; then
     feature_dir=$repo_root/data/$feature_dir_name
   else
     cd $concat_dir
-    feature_dir=$concat_dir/../$feature_dir_name
+    feature_dir=$repo_root/data/$feature_dir_name
   fi
 
   mkdir -p $feature_dir

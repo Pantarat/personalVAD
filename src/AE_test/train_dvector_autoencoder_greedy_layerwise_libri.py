@@ -90,7 +90,7 @@ LOSS_RAMP_EPOCHS = 40
 LOSS_COSINE_EPS = 1e-8
 
 # Contrastive negative term (push recon away from other speakers in batch)
-NEGATIVE_CONTRASTIVE_WEIGHT = 0.4
+NEGATIVE_CONTRASTIVE_WEIGHT = 0.2
 NEGATIVE_CONTRASTIVE_MARGIN = 0.2
 
 # Audio settings

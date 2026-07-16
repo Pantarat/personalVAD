@@ -214,6 +214,25 @@ if [ $stage -le 1 ]; then
   # Use train or test MUSAN data based on AUGMENT_MODE
   musan_suffix="_${AUGMENT_MODE}"
   echo "${yellow}Using MUSAN ${AUGMENT_MODE} data for augmentation${reset}"
+
+  # Optionally repeat augmentation passes to reach a target utterance count
+  # Set AUGMENT_TARGET_UTT_COUNT in the caller to enable this behavior.
+  target_utt_count=${AUGMENT_TARGET_UTT_COUNT:-0}
+  base_utt_count=0
+  if [ -f "data/$NAME/wav.scp" ]; then
+    base_utt_count=$(wc -l < "data/$NAME/wav.scp")
+  fi
+  repeat_count=1
+  if [ "$target_utt_count" -gt 0 ] && [ "$base_utt_count" -gt 0 ]; then
+    repeat_count=$(( (target_utt_count + base_utt_count - 1) / base_utt_count ))
+  fi
+  if [ "$repeat_count" -gt 1 ]; then
+    echo "${yellow}Target utt count: ${target_utt_count} (base: ${base_utt_count}) -> ${repeat_count} augmentation passes${reset}"
+  fi
+
+  noise_dirs=()
+  music_dirs=()
+  babble_dirs=()
   
   # Augment original data only - reverb is treated as a separate augmentation
   # This creates: data/noise, data/music, data/babble (all from original)
@@ -222,32 +241,59 @@ if [ $stage -le 1 ]; then
   # noise
   if $use_noise; then
     echo "${green}Creating noise augmentation...${reset}"
-    steps/data/augment_data_dir.py --utt-suffix "noise" --fg-interval 1 --fg-snrs "15:10:5:0" --fg-noise-dir "${musan_root}/musan_noise${musan_suffix}" data/$NAME data/noise
-    if [ $? -ne 0 ]; then
-      echo "${red}Error: Noise augmentation failed${reset}"
-      exit 1
-    fi
-    echo "${green}✓ Noise augmentation complete: $(wc -l < data/noise/wav.scp) utterances${reset}"
+    for i in $(seq 1 $repeat_count); do
+      noise_suffix="noise"
+      noise_dir="data/noise"
+      if [ "$repeat_count" -gt 1 ]; then
+        noise_suffix="noise${i}"
+        noise_dir="data/noise_${i}"
+      fi
+      steps/data/augment_data_dir.py --utt-suffix "$noise_suffix" --fg-interval 1 --fg-snrs "15:10:5:0" --fg-noise-dir "${musan_root}/musan_noise${musan_suffix}" data/$NAME "$noise_dir"
+      if [ $? -ne 0 ]; then
+        echo "${red}Error: Noise augmentation failed${reset}"
+        exit 1
+      fi
+      noise_dirs+=("$noise_dir")
+      echo "${green}✓ Noise augmentation complete (${noise_suffix}): $(wc -l < "$noise_dir/wav.scp") utterances${reset}"
+    done
   fi
   # music
   if $use_music; then
     echo "${green}Creating music augmentation...${reset}"
-    steps/data/augment_data_dir.py --utt-suffix "music" --bg-snrs "15:10:8:5" --num-bg-noises "1" --bg-noise-dir "${musan_root}/musan_music${musan_suffix}" data/$NAME data/music
-    if [ $? -ne 0 ]; then
-      echo "${red}Error: Music augmentation failed${reset}"
-      exit 1
-    fi
-    echo "${green}✓ Music augmentation complete: $(wc -l < data/music/wav.scp) utterances${reset}"
+    for i in $(seq 1 $repeat_count); do
+      music_suffix="music"
+      music_dir="data/music"
+      if [ "$repeat_count" -gt 1 ]; then
+        music_suffix="music${i}"
+        music_dir="data/music_${i}"
+      fi
+      steps/data/augment_data_dir.py --utt-suffix "$music_suffix" --bg-snrs "15:10:8:5" --num-bg-noises "1" --bg-noise-dir "${musan_root}/musan_music${musan_suffix}" data/$NAME "$music_dir"
+      if [ $? -ne 0 ]; then
+        echo "${red}Error: Music augmentation failed${reset}"
+        exit 1
+      fi
+      music_dirs+=("$music_dir")
+      echo "${green}✓ Music augmentation complete (${music_suffix}): $(wc -l < "$music_dir/wav.scp") utterances${reset}"
+    done
   fi
   # speech
   if $use_babble; then
     echo "${green}Creating babble augmentation...${reset}"
-    steps/data/augment_data_dir.py --utt-suffix "babble" --bg-snrs "20:17:15:13" --num-bg-noises "3:4:5:6:7" --bg-noise-dir "${musan_root}/musan_speech${musan_suffix}" data/$NAME data/babble
-    if [ $? -ne 0 ]; then
-      echo "${red}Error: Babble augmentation failed${reset}"
-      exit 1
-    fi
-    echo "${green}✓ Babble augmentation complete: $(wc -l < data/babble/wav.scp) utterances${reset}"
+    for i in $(seq 1 $repeat_count); do
+      babble_suffix="babble"
+      babble_dir="data/babble"
+      if [ "$repeat_count" -gt 1 ]; then
+        babble_suffix="babble${i}"
+        babble_dir="data/babble_${i}"
+      fi
+      steps/data/augment_data_dir.py --utt-suffix "$babble_suffix" --bg-snrs "20:17:15:13" --num-bg-noises "3:4:5:6:7" --bg-noise-dir "${musan_root}/musan_speech${musan_suffix}" data/$NAME "$babble_dir"
+      if [ $? -ne 0 ]; then
+        echo "${red}Error: Babble augmentation failed${reset}"
+        exit 1
+      fi
+      babble_dirs+=("$babble_dir")
+      echo "${green}✓ Babble augmentation complete (${babble_suffix}): $(wc -l < "$babble_dir/wav.scp") utterances${reset}"
+    done
   fi
 fi
 
@@ -261,9 +307,15 @@ else
   echo "  ℹ Excluding original data (augmented only)"
 fi
 if $use_reverb; then combine+=" data/reverb"; fi
-if $use_noise; then combine+=" data/noise"; fi
-if $use_music; then combine+=" data/music"; fi
-if $use_babble; then combine+=" data/babble"; fi
+if $use_noise; then
+  for d in "${noise_dirs[@]}"; do combine+=" $d"; done
+fi
+if $use_music; then
+  for d in "${music_dirs[@]}"; do combine+=" $d"; done
+fi
+if $use_babble; then
+  for d in "${babble_dirs[@]}"; do combine+=" $d"; done
+fi
 
 echo "${yellow}Combining: ${combine}${reset}"
 utils/combine_data.sh ${combine}

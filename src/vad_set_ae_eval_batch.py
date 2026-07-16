@@ -67,7 +67,7 @@ AE_MODEL_LIST = [
     # '../../dvector_ae_identity_1100x50Dev_noOV_1,6s_20-2-27',
     # '../dvector_ae_identity_1100x50Dev_wOV_balanced_1,6s_1-4-26',
     # '../dvector_ae_identity_1100x50Dev_wOV_balanced_1,6s_v2_10-4-26',
-    '../dvector_ae_identity_1100x50Dev_wOV_balanced_1,6s_v2_12-4-26',
+    # '../dvector_ae_identity_1100x50Dev_wOV_balanced_1,6s_v2_12-4-26',
     # '../dvector_ae_intermediate_babble_finetune_18-4-26', # Different than pretrain data (0.3 mse, 0.7 cos, lr 1e-4 0-15 SNR)
     # '../dvector_ae_intermediate_babble_finetune_20-4-26', # Different than pretrain data (0.1 mse, 0.9 cos, lr 1e-4 0-15 SNR)
     # '../dvector_ae_intermediate_babble_finetune_21-4-26', # Same as pretrain data (0.3 mse, 0.7 cos, lr 1e-5 0-15 SNR)
@@ -92,8 +92,20 @@ AE_MODEL_LIST = [
     # '../greedy/dvector_ae_greedy_layerwise_9_5-5-26',
     # '../greedy/dvector_ae_greedy_layerwise_10_5-5-26',
     # '../greedy/dvector_ae_greedy_layerwise_11_5-5-26',
-    '../greedy/dvector_ae_greedy_layerwise_14_6-5-26',
-    '../greedy/dvector_ae_greedy_layerwise_15_6-5-26',
+    # '../greedy/dvector_ae_greedy_layerwise_14_6-5-26',
+
+    # '../../greedy/dvector_ae_greedy_layerwise_15_6-5-26',
+    # 'dvector_ae-908_4pct_3utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    # '../61/dvector_ae-61_4pct_3utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    # 'dvector_ae-908_8pct_6utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    # 'dvector_ae-908_12pct_9utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    # 'dvector_ae-908_16pct_12utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    # 'dvector_ae-908_20pct_15utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    # 'dvector_ae-908_40pct_30utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    # 'dvector_ae-908_60pct_45utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    # 'dvector_ae-908_100pct_75utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+
+
     # '../dvector_ae_deep_stacked_greedy_babble_10_4-5-26',
     # '../dvector_ae_deep_stacked_greedy_babble_11_4-5-26',
     
@@ -118,34 +130,7 @@ AE_MODEL_LIST = [
     # 'dvector_ae-84_8pct_6utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_10ep',
     # 'dvector_ae-84_8pct_6utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_15ep',
 
-    
-    # 'dvector_ae-84_12pct_9utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_10ep',
-    # 'dvector_ae-84_12pct_9utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_15ep',
-    
-    # 'dvector_ae-8463_4pct_3utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_8pct_6utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_12pct_9utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_16pct_12utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_20pct_15utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_24pct_18utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_28pct_21utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_32pct_24utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_36pct_27utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_40pct_30utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_44pct_33utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_48pct_36utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_52pct_39utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_56pct_42utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_60pct_45utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_64pct_48utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_68pct_51utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_72pct_54utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_76pct_57utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_80pct_60utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_84pct_63utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_88pct_66utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_92pct_69utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
-    # 'dvector_ae-8463_96pct_72utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep',
+    # 'greedy_finetunev4_61_1_29-5-26',
 
     # 'dvector_ae-61_4pct_3utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_otherSingles_pretrain-2000_1e-5_50ep',
     # 'dvector_ae-61_4pct_3utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_otherSingles_pretrain-2000_1e-5_50ep',
@@ -178,8 +163,11 @@ AE_MODEL_LIST = [
     # '../61/dvector_ae-61_100pct_75utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep'
 ]
 
-AE_MODEL_LIST = ['src/AE_test/test_outputs/models/61/' + model_name for model_name in AE_MODEL_LIST]
+AE_MODEL_LIST = [f"mse{0}p{0}_cos{j//10}p{j%10}_neg{(10-j)//10}p{(10-j)%10}" for j in range(11)]
 
+AE_MODEL_LIST = ['src/AE_test/test_outputs/models/greedy_finetune_v4/908/' + model_name for model_name in AE_MODEL_LIST]
+
+OUTPUT_CSV = 'model_evaluation_results/greedy_finetune_v4/test.csv'
 
 # Include no-AE baseline in evaluation
 INCLUDE_NO_AE = True
@@ -209,7 +197,7 @@ SIMILARITY_SCORE_MAX_UTTS = 50
 
 # Per-model activation override (tanh/relu). Leave empty to use config.
 AE_ACTIVATION_OVERRIDE = {
-    'dvector_ae_identity_1100x50Dev_wOV_balanced_1,6s_v2_12-4-26': 'relu',
+    # 'dvector_ae_identity_1100x50Dev_wOV_balanced_1,6s_v2_12-4-26': 'relu',
 }
 
 # Reconstruction mode behavior for enrolled d-vectors
@@ -416,13 +404,7 @@ def _print_confusion_matrix_pct(conf_cm_pct, binary_mode=False):
         print(f"{true_name:<12}{row_vals}")
 
 
-def write_results_to_csv(results_list, output_path, binary_mode=False):
-    """Write evaluation results to CSV file"""
-    if not results_list:
-        print("No results to write!")
-        return
-    
-    # Define CSV columns based on classification mode
+def _get_csv_fieldnames(binary_mode):
     fieldnames = [
         'ae_model_name',
         'ae_model_path',
@@ -432,7 +414,7 @@ def write_results_to_csv(results_list, output_path, binary_mode=False):
         'recall_micro',
         'f1_micro',
     ]
-    
+
     if binary_mode:
         fieldnames.extend([
             'AP_NonTarget',
@@ -472,21 +454,67 @@ def write_results_to_csv(results_list, output_path, binary_mode=False):
             'conf_TSSasNTSS',
             'conf_TSSasTSS',
         ])
-    
+
+    return fieldnames
+
+
+def _load_existing_model_names(output_path):
+    """Return set of model names already present in the CSV."""
+    existing = set()
+    if not os.path.exists(output_path):
+        return existing
+
+    try:
+        with open(output_path, 'r', newline='') as csvfile:
+            reader = csv.DictReader(csvfile)
+            if not reader.fieldnames or 'ae_model_name' not in reader.fieldnames:
+                return existing
+            for row in reader:
+                name = row.get('ae_model_name')
+                if name:
+                    existing.add(name)
+    except OSError:
+        return existing
+
+    return existing
+
+
+def init_results_csv(output_path, binary_mode=False):
+    """Create/overwrite CSV and write header only."""
+    fieldnames = _get_csv_fieldnames(binary_mode)
     with open(output_path, 'w', newline='') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore')
         writer.writeheader()
-        
-        for result in results_list:
-            writer.writerow(result)
-    
-    print(f"\n✅ Results saved to: {output_path}")
+    print(f"\nResults CSV initialized: {output_path}")
+
+
+def append_result_to_csv(result, output_path, binary_mode=False):
+    """Append a single result row to the CSV."""
+    if not result:
+        return
+
+    fieldnames = _get_csv_fieldnames(binary_mode)
+    with open(output_path, 'a', newline='') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=fieldnames, extrasaction='ignore')
+        writer.writerow(result)
+
+
+def write_results_to_csv(results_list, output_path, binary_mode=False):
+    """Write evaluation results to CSV file"""
+    if not results_list:
+        print("No results to write!")
+        return
+
+    init_results_csv(output_path, binary_mode=binary_mode)
+    for result in results_list:
+        append_result_to_csv(result, output_path, binary_mode=binary_mode)
+
+    print(f"\nResults saved to: {output_path}")
 
 
 if __name__ == '__main__':
     # Configuration - Edit these values directly in the file
     # OUTPUT_CSV = 'model_evaluation_results/set_ae_sumNotmain_vary_percent_main_babble_main84_100_results.csv'
-    OUTPUT_CSV = 'model_evaluation_results/test.csv'
 
     QUIET = False
     FILTER_MAIN_SPEAKER = None  # Set to speaker ID like '84' to filter, or None for all speakers
@@ -523,6 +551,14 @@ if __name__ == '__main__':
     print(f"\n📋 Batch Evaluation Mode:")
     print(f"   Models to evaluate: {len(ae_models_to_evaluate)}")
     print(f"   Output CSV: {OUTPUT_CSV}")
+
+    existing_model_names = set()
+    if os.path.exists(OUTPUT_CSV) and os.path.getsize(OUTPUT_CSV) > 0:
+        existing_model_names = _load_existing_model_names(OUTPUT_CSV)
+        if existing_model_names and not QUIET:
+            print(f"   ✓ Found {len(existing_model_names)} existing entries in CSV; will skip them")
+    else:
+        init_results_csv(OUTPUT_CSV, binary_mode=BINARY_MODE)
     
     # Use reconstruction mode
     use_ae_reconstruction = USE_AE_RECONSTRUCTION
@@ -607,6 +643,12 @@ if __name__ == '__main__':
         # Set current model path
         current_ae_path = ae_model_path_current if ae_model_path_current != 'NO_AE' else None
         
+        model_name = Path(current_ae_path).name if current_ae_path else 'NO_AE'
+        if model_name in existing_model_names:
+            if not QUIET:
+                print(f"   ⏭️  Skipping {model_name} (already in CSV)")
+            continue
+
         # Load autoencoder and update dataset
         if use_autoencoder:
             if not QUIET:
@@ -835,7 +877,7 @@ if __name__ == '__main__':
         example_sequences = eval_details['example_sequences']
 
         # Export per-model example label files (3 utterances x 3 files)
-        model_name = os.path.basename(current_ae_path) if current_ae_path else 'NO_AE'
+        model_name = Path(current_ae_path).name if current_ae_path else 'NO_AE'
         if PLOT_SIMILARITY_SCORES and effective_recompute_scores:
             plot_path = _plot_similarity_scores(
                 model_name,
@@ -855,7 +897,7 @@ if __name__ == '__main__':
         
         # Prepare row for CSV
         csv_row = {
-            'ae_model_name': os.path.basename(current_ae_path) if current_ae_path else 'NO_AE',
+            'ae_model_name': model_name,
             'ae_model_path': current_ae_path if current_ae_path else 'N/A',
             'mAP': f"{mAP * 100:.2f}",
             'accuracy': f"{acc:.2f}",
@@ -903,6 +945,8 @@ if __name__ == '__main__':
             csv_row['conf_TSSasNTSS'] = f"{conf_cm_pct[2, 1]:.4f}"
             csv_row['conf_TSSasTSS'] = f"{conf_cm_pct[2, 2]:.4f}"
         
+        append_result_to_csv(csv_row, OUTPUT_CSV, binary_mode=BINARY_MODE)
+        existing_model_names.add(model_name)
         all_results.append(csv_row)
         
         # Print summary for this model
@@ -934,9 +978,6 @@ if __name__ == '__main__':
             )
             if SHOW_CONFUSION_MATRIX_PERCENT:
                 _print_confusion_matrix_pct(conf_cm_pct, binary_mode=False)
-    
-    # Write CSV
-    write_results_to_csv(all_results, OUTPUT_CSV, binary_mode=BINARY_MODE)
     
     # Print summary table
     print("\n" + "=" * 80)
