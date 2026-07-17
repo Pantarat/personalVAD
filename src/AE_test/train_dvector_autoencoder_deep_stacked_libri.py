@@ -10,11 +10,9 @@ Pipeline:
 5) Save checkpoints, plots, and config in loader-compatible format.
 """
 
-import hashlib
 import json
 import pickle
 import random
-import time
 import warnings
 from pathlib import Path
 
@@ -32,6 +30,11 @@ from tqdm.auto import tqdm
 from torchsummary import summary
 
 from autoencoder_utils import DeepStackedDvectorAutoencoder, load_autoencoder
+from readable_dvector_cache import (
+    checkpoint_dir_for_config as _readable_checkpoint_dir_for_config,
+    extract_with_cache as _readable_extract_with_cache,
+    normalize_for_hash as _normalize_for_hash,
+)
 
 # Suppress FutureWarning from resemblyzer library (librosa positional args deprecation)
 warnings.filterwarnings("ignore", category=FutureWarning, module="resemblyzer")
@@ -121,6 +124,27 @@ DVECTOR_CACHE_VERSION = 1
 EXTRACTION_CACHE_NAME = "deep_stacked_libri_babble_pairs"
 CHECKPOINT_INTERVAL = 500  # Save partial progress every N samples during extraction
 
+
+def _checkpoint_dir_for_config(cache_dir, cache_name, cache_config):
+    return _readable_checkpoint_dir_for_config(
+        cache_dir=cache_dir,
+        cache_name=cache_name,
+        cache_config=cache_config,
+        cache_version=DVECTOR_CACHE_VERSION,
+    )
+
+
+def _extract_with_cache(cache_dir, cache_name, cache_config, extractor_fn):
+    if not DVECTOR_CACHE_ENABLED:
+        return extractor_fn()
+    return _readable_extract_with_cache(
+        cache_dir=cache_dir,
+        cache_name=cache_name,
+        cache_config=cache_config,
+        extractor_fn=extractor_fn,
+        cache_version=DVECTOR_CACHE_VERSION,
+    )
+
 class NoisyCleanDvectorDataset(Dataset):
     """Dataset for mapping noisy d-vectors to clean d-vectors."""
 
@@ -137,51 +161,6 @@ class NoisyCleanDvectorDataset(Dataset):
         noisy = torch.from_numpy(self.noisy_dvectors[i]).float()
         clean = torch.from_numpy(self.clean_dvectors[i]).float()
         return noisy, clean
-
-
-def _normalize_for_hash(value):
-    """Normalize nested config payloads into deterministic JSON-serializable structures."""
-    if isinstance(value, Path):
-        return str(value)
-
-    if isinstance(value, dict):
-        normalized = {}
-        for key in sorted(value.keys(), key=lambda x: str(x)):
-            normalized[str(key)] = _normalize_for_hash(value[key])
-        return normalized
-
-    if isinstance(value, (list, tuple)):
-        return [_normalize_for_hash(v) for v in value]
-
-    if isinstance(value, set):
-        return [_normalize_for_hash(v) for v in sorted(value, key=lambda x: str(x))]
-
-    return value
-
-
-def _cache_file_for_config(cache_dir, cache_name, cache_config):
-    """Build deterministic cache file path from cache name + config."""
-    payload = {
-        "cache_name": cache_name,
-        "cache_version": DVECTOR_CACHE_VERSION,
-        "config": _normalize_for_hash(cache_config),
-    }
-    payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()[:16]
-    return cache_dir / f"{cache_name}_{digest}.pkl"
-
-
-def _checkpoint_dir_for_config(cache_dir, cache_name, cache_config):
-    """Build checkpoint directory path for partial extraction."""
-    payload = {
-        "cache_name": cache_name,
-        "cache_version": DVECTOR_CACHE_VERSION,
-        "config": _normalize_for_hash(cache_config),
-    }
-    payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()[:16]
-    checkpoint_dir = cache_dir / f"{cache_name}_{digest}"
-    return checkpoint_dir
 
 
 def _load_extraction_checkpoint(checkpoint_dir):
@@ -221,47 +200,6 @@ def _save_extraction_checkpoint(checkpoint_dir, keys, noisy_dvectors, clean_dvec
     with open(checkpoint_file, "wb") as f:
         pickle.dump(checkpoint, f)
     print(f"[checkpoint] Saved at sample count {len(keys)}, file index {last_file_index}/{total_files}")
-
-
-def _extract_with_cache(cache_dir, cache_name, cache_config, extractor_fn):
-    """Load cache by normalized config, or extract then save."""
-    t_start = time.perf_counter()
-    normalized_config = _normalize_for_hash(cache_config)
-    cache_file = _cache_file_for_config(cache_dir, cache_name, normalized_config)
-
-    if DVECTOR_CACHE_ENABLED and cache_file.exists():
-        try:
-            with open(cache_file, "rb") as f:
-                payload = pickle.load(f)
-
-            if isinstance(payload, dict) and "config" in payload and "data" in payload:
-                if payload.get("cache_version") == DVECTOR_CACHE_VERSION and payload.get("config") == normalized_config:
-                    data = payload["data"]
-                    n_pairs = len(data.get("keys", [])) if isinstance(data, dict) else 0
-                    print(f"[cache] Hit for {cache_name}: {cache_file} ({n_pairs} pairs)")
-                    print(f"[perf] Cache load time: {time.perf_counter() - t_start:.2f}s")
-                    return data
-        except Exception as e:
-            print(f"[cache] Failed reading cache, re-extracting: {e}")
-
-    print(f"[cache] Miss for {cache_name}; extracting")
-    data = extractor_fn()
-
-    if DVECTOR_CACHE_ENABLED:
-        payload = {
-            "cache_version": DVECTOR_CACHE_VERSION,
-            "config": normalized_config,
-            "data": data,
-        }
-        try:
-            with open(cache_file, "wb") as f:
-                pickle.dump(payload, f)
-            print(f"[cache] Saved: {cache_file}")
-        except Exception as e:
-            print(f"[cache] Failed to save cache: {e}")
-
-    print(f"[perf] Total cache wrapper time: {time.perf_counter() - t_start:.2f}s")
-    return data
 
 
 def discover_musan_speech_noise_files(speech_noise_root):

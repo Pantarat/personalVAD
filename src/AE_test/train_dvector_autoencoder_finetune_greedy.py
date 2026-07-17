@@ -51,6 +51,7 @@ from train_dvector_autoencoder_deep_stacked_libri import (
     load_noise_segment,
     mix_audio_with_snr,
 )
+from readable_dvector_cache import extract_with_cache as _readable_extract_with_cache
 
 
 def print_ts(*args, **kwargs):
@@ -247,21 +248,6 @@ def _set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def _normalize_for_hash(value):
-    if isinstance(value, Path):
-        return str(value.resolve())
-    if isinstance(value, dict):
-        normalized = {}
-        for key in sorted(value.keys(), key=lambda x: str(x)):
-            normalized[str(key)] = _normalize_for_hash(value[key])
-        return normalized
-    if isinstance(value, (list, tuple)):
-        return [_normalize_for_hash(v) for v in value]
-    if isinstance(value, set):
-        return [_normalize_for_hash(v) for v in sorted(value, key=lambda x: str(x))]
-    return value
-
-
 def _hash_list(values):
     if not values:
         return None
@@ -273,57 +259,16 @@ def _hash_list(values):
     return digest.hexdigest()
 
 
-def _cache_file_for_config(cache_dir, cache_name, cache_config):
-    payload = {
-        "cache_name": cache_name,
-        "cache_version": DVECTOR_CACHE_VERSION,
-        "config": _normalize_for_hash(cache_config),
-    }
-    payload_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()[:16]
-    return cache_dir / f"{cache_name}_{digest}.pkl"
-
-
 def _extract_with_cache(cache_dir, cache_name, cache_config, extractor_fn):
-    normalized_config = _normalize_for_hash(cache_config)
-    cache_file = _cache_file_for_config(cache_dir, cache_name, normalized_config)
-
-    if DVECTOR_CACHE_ENABLED and cache_file.exists():
-        try:
-            with open(cache_file, "rb") as f:
-                cached_payload = pickle.load(f)
-
-            if isinstance(cached_payload, dict) and "config" in cached_payload and "data" in cached_payload:
-                cached_config = cached_payload.get("config")
-                cached_version = cached_payload.get("cache_version")
-                if cached_version == DVECTOR_CACHE_VERSION and cached_config == normalized_config:
-                    print(f"\n♻️  Cache hit for {cache_name}: {cache_file}")
-                    return cached_payload["data"]
-                print(f"\n⚠️  Cache config/version mismatch for {cache_name}, regenerating")
-            else:
-                print(f"\n♻️  Cache hit for {cache_name}: {cache_file}")
-                return cached_payload
-        except Exception as e:
-            print(f"\n⚠️  Failed reading cache for {cache_name}: {e}")
-            print("   Re-extracting d-vectors...")
-
-    print(f"\n🔄 Cache miss for {cache_name}; extracting d-vectors...")
-    data = extractor_fn()
-
-    if DVECTOR_CACHE_ENABLED:
-        cache_payload = {
-            "cache_version": DVECTOR_CACHE_VERSION,
-            "config": normalized_config,
-            "data": data,
-        }
-        try:
-            with open(cache_file, "wb") as f:
-                pickle.dump(cache_payload, f)
-            print(f"✓ Cached {cache_name} to: {cache_file}")
-        except Exception as e:
-            print(f"⚠️  Could not write cache for {cache_name}: {e}")
-
-    return data
+    if not DVECTOR_CACHE_ENABLED:
+        return extractor_fn()
+    return _readable_extract_with_cache(
+        cache_dir=cache_dir,
+        cache_name=cache_name,
+        cache_config=cache_config,
+        extractor_fn=extractor_fn,
+        cache_version=DVECTOR_CACHE_VERSION,
+    )
 
 
 def _flatten_clean_dict(clean_by_speaker):
