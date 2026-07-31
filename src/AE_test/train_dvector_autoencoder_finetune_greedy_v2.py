@@ -74,19 +74,20 @@ print = print_ts
 # ============================================================================
 
 # Model init (greedy layerwise pretrain)
-# PRETRAINED_MODEL_PATH = "test_outputs/models/greedy/dvector_ae_greedy_layerwise_weight_sweep_15_22-5-26/mse0p0_cos0p6_neg0p4"
-PRETRAINED_MODEL_PATH = ""
+PRETRAINED_MODEL_PATH = "test_outputs/models/greedy/dvector_ae_greedy_layerwise_weight_sweep_15_22-5-26/mse0p0_cos0p6_neg0p4"
+# PRETRAINED_MODEL_PATH = "test_outputs/models/stacked/dvector_ae_stacked_1_17-7-26"
+# PRETRAINED_MODEL_PATH = ""
 RANDOM_INIT_GREEDY_HIDDEN_DIMS = [192, 192]
 RANDOM_INIT_DROPOUT_RATE = 0.1
 RANDOM_INIT_NORM_TYPE = "layernorm"
 RANDOM_INIT_ACTIVATION_TYPE = "tanh"
 
-MODEL_SAVE_DIR = "test_outputs/models/greedy_finetune/6829_0,7,3_14-6-26"
+MODEL_SAVE_DIR = "test_outputs/models/greedy_finetune/121_v2_tests/12_28-7-26"
 
 # Data sources
 LIBRISPEECH_PATH = "../../data/LibriSpeech"
 OVERLAP_TARGET_DIRS = [
-    "test_outputs/data/6829/6829_100pct_75utt-50spk+300Dev_5s_100pctmainspk_100pctAmp_2000"
+    "test_outputs/data/121/121_100pct_75utt-50spk+300Dev_5s_100pctmainspk_100pctAmp_2000"
 ]
 OVERLAP_NON_TARGET_DIRS = [
     "test_outputs/300Dev_5s_trainOther500_100pctAmp_40000"
@@ -94,31 +95,31 @@ OVERLAP_NON_TARGET_DIRS = [
 
 # Single speaker dataset dirs for target speaker (optional override)
 SINGLE_SPEAKER_DATASETS = [
-    "../../data/speaker_6829/train1",
-    "../../data/speaker_6829/train2",
-    "../../data/speaker_6829/train3",
-    "../../data/speaker_6829/train4",
-    "../../data/speaker_6829/train5",
-    "../../data/speaker_6829/train6",
-    "../../data/speaker_6829/train7",
-    "../../data/speaker_6829/train8",
-    "../../data/speaker_6829/train9",
-    "../../data/speaker_6829/train10",
-    "../../data/speaker_6829/train11",
-    "../../data/speaker_6829/train12",
-    "../../data/speaker_6829/train13",
-    "../../data/speaker_6829/train14",
-    "../../data/speaker_6829/train15",
-    "../../data/speaker_6829/train16",
-    "../../data/speaker_6829/train17",
-    "../../data/speaker_6829/train18",
-    "../../data/speaker_6829/train19",
-    "../../data/speaker_6829/train20",
-    "../../data/speaker_6829/train21",
-    "../../data/speaker_6829/train22",
-    "../../data/speaker_6829/train23",
-    "../../data/speaker_6829/train24",
-    "../../data/speaker_6829/train25",
+    "../../data/speaker_121/train1",
+    "../../data/speaker_121/train2",
+    "../../data/speaker_121/train3",
+    "../../data/speaker_121/train4",
+    "../../data/speaker_121/train5",
+    "../../data/speaker_121/train6",
+    "../../data/speaker_121/train7",
+    "../../data/speaker_121/train8",
+    "../../data/speaker_121/train9",
+    "../../data/speaker_121/train10",
+    "../../data/speaker_121/train11",
+    "../../data/speaker_121/train12",
+    "../../data/speaker_121/train13",
+    "../../data/speaker_121/train14",
+    "../../data/speaker_121/train15",
+    "../../data/speaker_121/train16",
+    "../../data/speaker_121/train17",
+    "../../data/speaker_121/train18",
+    "../../data/speaker_121/train19",
+    "../../data/speaker_121/train20",
+    "../../data/speaker_121/train21",
+    "../../data/speaker_121/train22",
+    "../../data/speaker_121/train23",
+    "../../data/speaker_121/train24",
+    "../../data/speaker_121/train25",
 ]
 
 # LibriSpeech subset(s) for clean non-target identity pairs
@@ -163,8 +164,8 @@ PAIR_TARGET_COUNTS = {
     "clean_target_plus_noise": 2000,
     "overlap_target": 2000,
     "overlap_non_target_self": 2000,
-    "clean_target_identity": 2000,
-    "clean_non_target_identity": 0,
+    "clean_target_identity": 0,
+    "clean_non_target_identity": 2000,
     "noise_to_silence": 100,
 }
 
@@ -186,12 +187,12 @@ def _pair_enabled(pair_name):
     return count > 0
 
 # Training
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 LEARNING_RATE = 1e-5
 NUM_EPOCHS = 200
 VALIDATION_SPLIT = 0.1
 TEST_SPLIT = 0.05
-EARLY_STOPPING_PATIENCE = 40
+EARLY_STOPPING_PATIENCE = 20
 
 # Learning rate decay (ReduceLROnPlateau)
 USE_LR_SCHEDULER = True
@@ -208,9 +209,7 @@ LOSS_COSINE_WEIGHT = 0.7
 LOSS_COSINE_EPS = 1e-8
 NEGATIVE_CONTRASTIVE_WEIGHT = 0.3
 NEGATIVE_CONTRASTIVE_MARGIN = 0.2
-USE_IN_BATCH_SHUFFLED_NEGATIVES = True
-USE_NOISE_NEGATIVE_POOL = True
-EXCLUDE_TARGET_PAIRS_FROM_NEGATIVE = True
+NEGATIVE_POOL_SAMPLE_COUNT = 1
 
 # Misc
 SAMPLE_RATE = 16000
@@ -578,20 +577,6 @@ def _build_audio_index(audio_files):
     return index
 
 
-def _load_audio_segment(path_str, sample_rate, duration_sec=None):
-    if not path_str:
-        return None
-
-    audio, _ = librosa.load(path_str, sr=sample_rate, duration=duration_sec)
-    if duration_sec is None:
-        return audio
-
-    min_samples = int(duration_sec * sample_rate)
-    if len(audio) < min_samples:
-        audio = np.pad(audio, (0, min_samples - len(audio)), mode="constant")
-    return audio
-
-
 def _chunk_audio(audio, sample_rate, chunk_duration_sec):
     chunk_size = int(sample_rate * chunk_duration_sec)
     if chunk_size <= 0 or audio is None:
@@ -659,24 +644,6 @@ class _DebugPairWriter:
             metadata=metadata,
         )
         self.counts[pair_type] = idx + 1
-
-
-def _collect_musan_train_files(musan_root):
-    musan_path = Path(musan_root)
-    if not musan_path.exists():
-        return []
-
-    candidates = []
-    if musan_path.name == "musan_speech_train":
-        folder_path = musan_path
-    else:
-        folder_path = musan_path / "musan_speech_train"
-    if not folder_path.exists():
-        return candidates
-    for pattern in ("**/*.wav", "**/*.flac"):
-        candidates.extend([str(p) for p in folder_path.glob(pattern) if p.is_file()])
-    return candidates
-
 
 def _extract_speech_noise_dvectors(
     encoder,
@@ -872,14 +839,50 @@ def _build_non_target_overlap_pairs_from_audio(
     return pairs
 
 
-def _train_epoch(model, loader, optimizer, noise_negative_pool=None):
+def _build_negative_pool_from_pairs(pair_groups, pool_group_names, extra_vectors=None):
+    samples = []
+    for name, pairs in pair_groups.items():
+        if name not in pool_group_names:
+            continue
+        for pair in pairs or []:
+            if not isinstance(pair, (tuple, list)) or len(pair) < 2:
+                continue
+            samples.append(pair[1])
+
+    if extra_vectors:
+        samples.extend(extra_vectors)
+
+    if not samples:
+        return None
+
+    return np.stack(samples).astype(np.float32)
+
+
+def _compute_negative_pool_loss(recon_vector, pool, margin):
+    if pool is None or pool.numel() == 0:
+        return None
+
+    sample_count = max(1, int(NEGATIVE_POOL_SAMPLE_COUNT))
+    sample_count = min(sample_count, int(pool.size(0)))
+    if sample_count <= 0:
+        return None
+
+    pool_idx = torch.randint(0, pool.size(0), (sample_count,), device=recon_vector.device)
+    pool_samples = pool[pool_idx]
+    pool_samples = F.normalize(pool_samples, p=2, dim=1, eps=LOSS_COSINE_EPS)
+    recon_vector = recon_vector.view(1, -1)
+    pool_cos = F.cosine_similarity(recon_vector, pool_samples, dim=1, eps=LOSS_COSINE_EPS)
+    neg_vals = F.relu(pool_cos - margin)
+    return neg_vals.mean()
+
+
+def _train_epoch(model, loader, optimizer, target_negative_pool=None, non_target_negative_pool=None):
     model.train()
     total_loss = 0.0
     total_mse = 0.0
     total_cos = 0.0
     total_neg = 0.0
 
-    logged_mask = False
     for batch_idx, (noisy, clean, is_target_pair) in enumerate(loader):
         noisy = noisy.to(DEVICE)
         clean = clean.to(DEVICE)
@@ -891,56 +894,30 @@ def _train_epoch(model, loader, optimizer, noise_negative_pool=None):
         mse = F.mse_loss(recon, clean_norm)
         cos = 1.0 - F.cosine_similarity(recon, clean_norm, dim=1, eps=LOSS_COSINE_EPS).mean()
 
-        # if noisy.size(0) > 1:
-        #     shuffle = torch.randperm(noisy.size(0), device=noisy.device)
-        #     neg_target = clean_norm[shuffle]
-        #     neg_cos = F.cosine_similarity(recon, neg_target, dim=1, eps=LOSS_COSINE_EPS)
-        #     neg = F.relu(neg_cos - NEGATIVE_CONTRASTIVE_MARGIN).mean()
-        # else:
-        #     neg = torch.tensor(0.0, device=noisy.device)
         neg = torch.tensor(0.0, device=noisy.device)
 
-        if USE_IN_BATCH_SHUFFLED_NEGATIVES and noisy.size(0) > 1:
-            shuffle = torch.randperm(noisy.size(0), device=noisy.device)
-            neg_target = clean_norm[shuffle]
+        if target_negative_pool is not None and non_target_negative_pool is not None:
+            neg_terms = []
 
-            neg_cos = F.cosine_similarity(
-                recon,
-                neg_target,
-                dim=1,
-                eps=LOSS_COSINE_EPS,
-            )
+            for sample_idx in range(recon.size(0)):
+                if bool(is_target_pair[sample_idx].item()):
+                    # pool = non_target_negative_pool
+                    # neg_term = _compute_negative_pool_loss(recon[sample_idx], pool, NEGATIVE_CONTRASTIVE_MARGIN)
+                    neg_term = None
+                    neg_term2 = None
+                else:
+                    # pool = target_negative_pool
+                    neg_term = _compute_negative_pool_loss(recon[sample_idx], target_negative_pool, NEGATIVE_CONTRASTIVE_MARGIN)
+                    neg_term2 = _compute_negative_pool_loss(recon[sample_idx], non_target_negative_pool, NEGATIVE_CONTRASTIVE_MARGIN)
+                # pool = non_target_negative_pool if bool(is_target_pair[sample_idx].item()) else target_negative_pool
+                
+                if neg_term is not None:
+                    neg_terms.append(neg_term)
+                if neg_term2 is not None:
+                    neg_terms.append(neg_term2)
 
-            neg_vals = F.relu(neg_cos - NEGATIVE_CONTRASTIVE_MARGIN)
-            if EXCLUDE_TARGET_PAIRS_FROM_NEGATIVE:
-                neg_mask = (~is_target_pair).float()
-                valid = neg_mask.sum()
-                if valid > 0:
-                    neg = neg + (neg_vals * neg_mask).sum() / valid
-                if not logged_mask and batch_idx == 0:
-                    masked = int((is_target_pair).sum().item())
-                    print(f"[neg] In-batch masked {masked}/{noisy.size(0)} target-pair samples")
-                    logged_mask = True
-            else:
-                neg = neg + neg_vals.mean()
-
-        if noise_negative_pool is not None and noise_negative_pool.numel() > 0:
-            noise_idx = torch.randint(0, noise_negative_pool.size(0), (noisy.size(0),), device=noisy.device)
-            noise_target = noise_negative_pool[noise_idx]
-            noise_target = F.normalize(noise_target, p=2, dim=1, eps=LOSS_COSINE_EPS)
-            noise_cos = F.cosine_similarity(recon, noise_target, dim=1, eps=LOSS_COSINE_EPS)
-            noise_vals = F.relu(noise_cos - NEGATIVE_CONTRASTIVE_MARGIN)
-            if EXCLUDE_TARGET_PAIRS_FROM_NEGATIVE:
-                noise_mask = (~is_target_pair).float()
-                valid = noise_mask.sum()
-                if valid > 0:
-                    neg = neg + (noise_vals * noise_mask).sum() / valid
-                if not logged_mask and batch_idx == 0:
-                    masked = int((is_target_pair).sum().item())
-                    print(f"[neg] Noise-pool masked {masked}/{noisy.size(0)} target-pair samples")
-                    logged_mask = True
-            else:
-                neg = neg + noise_vals.mean()
+            if neg_terms:
+                neg = torch.stack(neg_terms).mean()
 
         loss = (LOSS_MSE_WEIGHT * mse) + (LOSS_COSINE_WEIGHT * cos) + (NEGATIVE_CONTRASTIVE_WEIGHT * neg)
         loss.backward()
@@ -955,14 +932,13 @@ def _train_epoch(model, loader, optimizer, noise_negative_pool=None):
     return total_loss / n_batches, total_mse / n_batches, total_cos / n_batches, total_neg / n_batches
 
 
-def _eval_epoch(model, loader, noise_negative_pool=None):
+def _eval_epoch(model, loader, target_negative_pool=None, non_target_negative_pool=None):
     model.eval()
     total_loss = 0.0
     total_mse = 0.0
     total_cos = 0.0
     total_neg = 0.0
 
-    logged_mask = False
     with torch.no_grad():
         for batch_idx, (noisy, clean, is_target_pair) in enumerate(loader):
             noisy = noisy.to(DEVICE)
@@ -974,56 +950,30 @@ def _eval_epoch(model, loader, noise_negative_pool=None):
             mse = F.mse_loss(recon, clean_norm)
             cos = 1.0 - F.cosine_similarity(recon, clean_norm, dim=1, eps=LOSS_COSINE_EPS).mean()
 
-            # if noisy.size(0) > 1:
-            #     shuffle = torch.randperm(noisy.size(0), device=noisy.device)
-            #     neg_target = clean_norm[shuffle]
-            #     neg_cos = F.cosine_similarity(recon, neg_target, dim=1, eps=LOSS_COSINE_EPS)
-            #     neg = F.relu(neg_cos - NEGATIVE_CONTRASTIVE_MARGIN).mean()
-            # else:
-            #     neg = torch.tensor(0.0, device=noisy.device)
             neg = torch.tensor(0.0, device=noisy.device)
 
-            if USE_IN_BATCH_SHUFFLED_NEGATIVES and noisy.size(0) > 1:
-                shuffle = torch.randperm(noisy.size(0), device=noisy.device)
-                neg_target = clean_norm[shuffle]
+            if target_negative_pool is not None and non_target_negative_pool is not None:
+                neg_terms = []
 
-                neg_cos = F.cosine_similarity(
-                    recon,
-                    neg_target,
-                    dim=1,
-                    eps=LOSS_COSINE_EPS,
-                )
+                for sample_idx in range(recon.size(0)):
+                    if bool(is_target_pair[sample_idx].item()):
+                        # pool = non_target_negative_pool
+                        # neg_term = _compute_negative_pool_loss(recon[sample_idx], pool, NEGATIVE_CONTRASTIVE_MARGIN)
+                        neg_term = None
+                        neg_term2 = None
+                    else:
+                        # pool = target_negative_pool
+                        neg_term = _compute_negative_pool_loss(recon[sample_idx], target_negative_pool, NEGATIVE_CONTRASTIVE_MARGIN)
+                        neg_term2 = _compute_negative_pool_loss(recon[sample_idx], non_target_negative_pool, NEGATIVE_CONTRASTIVE_MARGIN)
+                    # pool = non_target_negative_pool if bool(is_target_pair[sample_idx].item()) else target_negative_pool
+                    
+                    if neg_term is not None:
+                        neg_terms.append(neg_term)
+                    if neg_term2 is not None:
+                        neg_terms.append(neg_term2)
 
-                neg_vals = F.relu(neg_cos - NEGATIVE_CONTRASTIVE_MARGIN)
-                if EXCLUDE_TARGET_PAIRS_FROM_NEGATIVE:
-                    neg_mask = (~is_target_pair).float()
-                    valid = neg_mask.sum()
-                    if valid > 0:
-                        neg = neg + (neg_vals * neg_mask).sum() / valid
-                    if not logged_mask and batch_idx == 0:
-                        masked = int((is_target_pair).sum().item())
-                        print(f"[neg] In-batch masked {masked}/{noisy.size(0)} target-pair samples (val)")
-                        logged_mask = True
-                else:
-                    neg = neg + neg_vals.mean()
-
-            if noise_negative_pool is not None and noise_negative_pool.numel() > 0:
-                noise_idx = torch.randint(0, noise_negative_pool.size(0), (noisy.size(0),), device=noisy.device)
-                noise_target = noise_negative_pool[noise_idx]
-                noise_target = F.normalize(noise_target, p=2, dim=1, eps=LOSS_COSINE_EPS)
-                noise_cos = F.cosine_similarity(recon, noise_target, dim=1, eps=LOSS_COSINE_EPS)
-                noise_vals = F.relu(noise_cos - NEGATIVE_CONTRASTIVE_MARGIN)
-                if EXCLUDE_TARGET_PAIRS_FROM_NEGATIVE:
-                    noise_mask = (~is_target_pair).float()
-                    valid = noise_mask.sum()
-                    if valid > 0:
-                        neg = neg + (noise_vals * noise_mask).sum() / valid
-                    if not logged_mask and batch_idx == 0:
-                        masked = int((is_target_pair).sum().item())
-                        print(f"[neg] Noise-pool masked {masked}/{noisy.size(0)} target-pair samples (val)")
-                        logged_mask = True
-                else:
-                    neg = neg + noise_vals.mean()
+                if neg_terms:
+                    neg = torch.stack(neg_terms).mean()
 
             loss = (LOSS_MSE_WEIGHT * mse) + (LOSS_COSINE_WEIGHT * cos) + (NEGATIVE_CONTRASTIVE_WEIGHT * neg)
 
@@ -1169,10 +1119,12 @@ def main():
         raise ValueError("No clean target d-vectors found")
 
     pair_groups = {}
-    noise_negative_pool = None
+    target_negative_pool = None
+    non_target_negative_pool = None
     overlap_pairs = []
     non_target_pairs = []
     clean_non_target_pairs = []
+    noise_pool_vectors = []
 
     debug_writer = None
     if SAVE_DEBUG_PAIR_SAMPLES:
@@ -1428,20 +1380,30 @@ def main():
             noise_pairs.append((noise["dvector"], silence["dvector"]))
         pair_groups["noise_to_silence"] = noise_pairs
 
-        if USE_NOISE_NEGATIVE_POOL:
-            negatives = []
-            if 'noise_dvectors' in locals() and noise_dvectors:
-                negatives.extend([v["dvector"] for v in noise_dvectors.values()])
-            if clean_non_target_pairs:
-                negatives.extend([p[0] for p in clean_non_target_pairs])
-            if non_target_pairs:
-                negatives.extend([p[0] for p in non_target_pairs])
+        noise_pool_vectors.extend([v["dvector"] for v in noise_dvectors.values()])
 
-            if negatives:
-                neg_pool = np.stack(negatives).astype(np.float32)
-                noise_negative_pool = torch.from_numpy(neg_pool).to(DEVICE)
-            else:
-                noise_negative_pool = None
+    target_pool_group_names = {
+        "clean_target_plus_noise",
+        "overlap_target",
+        "clean_target_identity",
+    }
+    non_target_pool_group_names = {
+        "overlap_non_target_self",
+        "clean_non_target_identity",
+        "noise_to_silence",
+    }
+
+    target_pool = _build_negative_pool_from_pairs(pair_groups, target_pool_group_names)
+    non_target_pool = _build_negative_pool_from_pairs(
+        pair_groups,
+        non_target_pool_group_names,
+        extra_vectors=noise_pool_vectors,
+    )
+
+    if target_pool is not None:
+        target_negative_pool = torch.from_numpy(target_pool).to(DEVICE)
+    if non_target_pool is not None:
+        non_target_negative_pool = torch.from_numpy(non_target_pool).to(DEVICE)
 
     if pair_groups:
         print("\n[pairs] Raw pair counts (pre-balance):")
@@ -1579,10 +1541,17 @@ def main():
 
     for epoch in range(NUM_EPOCHS):
         train_loss, train_mse, train_cos, train_neg = _train_epoch(
-            model, train_loader, optimizer, noise_negative_pool=noise_negative_pool
+            model,
+            train_loader,
+            optimizer,
+            target_negative_pool=target_negative_pool,
+            non_target_negative_pool=non_target_negative_pool,
         )
         val_loss, val_mse, val_cos, val_neg = _eval_epoch(
-            model, val_loader, noise_negative_pool=noise_negative_pool
+            model,
+            val_loader,
+            target_negative_pool=target_negative_pool,
+            non_target_negative_pool=non_target_negative_pool,
         )
 
         # current learning rate (first param group)

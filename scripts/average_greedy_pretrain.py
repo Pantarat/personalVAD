@@ -15,17 +15,18 @@ from typing import Dict, List, Sequence, Set, Tuple
 
 
 # =============================== CONFIG ===============================
+FOLDER_NAME_PATTERN = "NO_AE"
 
-INPUT_DIR = "model_evaluation_results/greedy_finetunev5_tt/direct_finetune/grouped_by_percent/NO_AE/"
+INPUT_DIR = f"model_evaluation_results/greedy_finetunev5_ff/nonLayerwisePretrain/grouped_by_percent/{FOLDER_NAME_PATTERN}/"
 # FILES = [
-#     'test_dvector_ae-61_100pct_75utt-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
-#     'test_dvector_ae-121_100pct_75utt-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
-#     'test_dvector_ae-174_100pct_75utt-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
-#     'test_dvector_ae-260_100pct_75utt-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
-#     'test_dvector_ae-908_100pct_75utt-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
-#     'test_dvector_ae-1221_100pct_75utt-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
-#     'test_dvector_ae-1462_100pct_75utt-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
-#     'test_dvector_ae-6829_100pct_75utt-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
+#     f'test_dvector_ae-61_{FOLDER_NAME_PATTERN}-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
+#     f'test_dvector_ae-121_{FOLDER_NAME_PATTERN}-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
+#     f'test_dvector_ae-174_{FOLDER_NAME_PATTERN}-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
+#     f'test_dvector_ae-260_{FOLDER_NAME_PATTERN}-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
+#     f'test_dvector_ae-908_{FOLDER_NAME_PATTERN}-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
+#     f'test_dvector_ae-1221_{FOLDER_NAME_PATTERN}-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
+#     f'test_dvector_ae-1462_{FOLDER_NAME_PATTERN}-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
+#     f'test_dvector_ae-6829_{FOLDER_NAME_PATTERN}-50spk_300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep.csv',
 # ]
 FILES = [
     '61_NOAE.csv',
@@ -38,7 +39,7 @@ FILES = [
     '6829_NOAE.csv',
 ]
 FILE_GLOB = "*.csv"
-OUTPUT_PATH = "model_evaluation_results/greedy_finetunev5_tt/direct_finetune/grouped_by_percent/NO_AE/average.csv"
+OUTPUT_PATH = f"model_evaluation_results/greedy_finetunev5_ff/nonLayerwisePretrain/grouped_by_percent/{FOLDER_NAME_PATTERN}/average.csv"
 GROUP_BY_COLUMNS = [
     "ae_model_name",
 ]

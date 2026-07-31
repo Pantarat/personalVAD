@@ -159,18 +159,18 @@ AE_MODEL_LIST = [
     
     # 'dvector_ae-84_100pct_75utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_otherSingles_pretrain-2000_0.00001lr_50ep',
     # 'dvector_ae-84_100pct_75utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_otherSingles_pretrain-2000_0.00001lr_50ep(1)'
-    
+    'src/AE_test/test_outputs/models/greedy_finetune/121_v2_tests/12_28-7-26/'
     # '../61/dvector_ae-61_100pct_75utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_pretrain-2000_0.00001lr_5ep'
 ]
 
-AE_MODEL_LIST = [f"mse{0}p{0}_cos{j//10}p{j%10}_neg{(10-j)//10}p{(10-j)%10}" for j in range(11)]
+# AE_MODEL_LIST = [f"mse{0}p{0}_cos{j//10}p{j%10}_neg{(10-j)//10}p{(10-j)%10}" for j in range(11)]
 
-AE_MODEL_LIST = ['src/AE_test/test_outputs/models/greedy_finetune_v4/908/' + model_name for model_name in AE_MODEL_LIST]
+# AE_MODEL_LIST = ['src/AE_test/test_outputs/models/greedy_finetune_newv2_sweep/61/' + model_name for model_name in AE_MODEL_LIST]
 
-OUTPUT_CSV = 'model_evaluation_results/greedy_finetune_v4/test.csv'
+OUTPUT_CSV = 'model_evaluation_results/test.csv'
 
 # Include no-AE baseline in evaluation
-INCLUDE_NO_AE = True
+INCLUDE_NO_AE = False
 
 # Score recomputation settings (imported from vad_set_ae_eval.py)
 # To change: edit RECOMPUTE_SCORES in vad_set_ae_eval.py

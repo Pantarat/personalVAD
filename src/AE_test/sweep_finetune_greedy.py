@@ -11,11 +11,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import train_dvector_autoencoder_finetune_greedy as base
+import train_dvector_autoencoder_finetune_greedy_v2 as base
 
 # Sweep settings
 SWEEP_STEP = 0.1
-SWEEP_SAVE_ROOT = "test_outputs/models/greedy_finetune_v4/260"
+SWEEP_SAVE_ROOT = "test_outputs/models/greedy_finetune_newv2/61"
 RESUME_FROM_LAST_COMPLETED = True
 RESUME_MARKER_FILES = ("config.pkl", "final_model.pth")
 

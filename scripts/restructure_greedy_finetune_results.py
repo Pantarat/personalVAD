@@ -8,9 +8,9 @@ from pathlib import Path
 
 # ============================== CONFIG ==============================
 
-SOURCE_ROOT = Path("model_evaluation_results/greedy_finetunev5_tt/direct_finetune/")
+SOURCE_ROOT = Path("model_evaluation_results/greedy_finetunev5_ff/nonLayerwisePretrain/")
 # Set OUTPUT_ROOT = SOURCE_ROOT if you want the mixed tf-style layout in place.
-OUTPUT_ROOT = Path("model_evaluation_results/greedy_finetunev5_tt/direct_finetune/group_by_speaker/")
+OUTPUT_ROOT = Path("model_evaluation_results/greedy_finetunev5_ff/nonLayerwisePretrain/grouped_by_percent/")
 
 SPEAKER_DIR_PATTERN = re.compile(r"^\d+$")
 PERCENT_UTT_PATTERN = re.compile(r"_(\d+pct_\d+utt)-")

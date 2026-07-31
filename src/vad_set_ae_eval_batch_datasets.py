@@ -15,6 +15,7 @@ import os
 import sys
 import shutil
 import re
+import json
 from pathlib import Path
 import csv
 import matplotlib.pyplot as plt
@@ -48,30 +49,122 @@ from personal_vad import PersonalVAD
 
 # Fixed AE model(s) to evaluate on all datasets.
 # Accepts either a single path string or a list/tuple of path strings.
+# Use {speaker_id} in the path to make AE model selection speaker-specific.
 AE_MODEL_PATH = [
-    # 'src/AE_test/test_outputs/models/greedy_finetune_fromScratch/6829_0,7,3_6-6-26',
-    'src/AE_test/test_outputs/models/greedy_finetunev5/direct_finetune/908/dvector_ae-908_4pct_3utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
-    'src/AE_test/test_outputs/models/greedy_finetunev5/direct_finetune/908/dvector_ae-908_8pct_6utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
-    'src/AE_test/test_outputs/models/greedy_finetunev5/direct_finetune/908/dvector_ae-908_12pct_9utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
-    'src/AE_test/test_outputs/models/greedy_finetunev5/direct_finetune/908/dvector_ae-908_16pct_12utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
-    'src/AE_test/test_outputs/models/greedy_finetunev5/direct_finetune/908/dvector_ae-908_20pct_15utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
-    'src/AE_test/test_outputs/models/greedy_finetunev5/direct_finetune/908/dvector_ae-908_40pct_30utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
-    'src/AE_test/test_outputs/models/greedy_finetunev5/direct_finetune/908/dvector_ae-908_60pct_45utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
-    'src/AE_test/test_outputs/models/greedy_finetunev5/direct_finetune/908/dvector_ae-908_80pct_60utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
-    'src/AE_test/test_outputs/models/greedy_finetunev5/direct_finetune/908/dvector_ae-908_100pct_75utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    # 'src/AE_test/test_outputs/models/greedy_finetune_fromScratch/{speaker_id}_0,7,3_6-6-26',\
+    # 'src/AE_test/test_outputs/models/greedy_finetune/{speaker_id}_v2_tests/4_25-7-26',
+    'src/AE_test/test_outputs/models/greedy_finetunev7/layerwisePretrain/{speaker_id}/dvector_ae-{speaker_id}_4pct_3utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    'src/AE_test/test_outputs/models/greedy_finetunev7/layerwisePretrain/{speaker_id}/dvector_ae-{speaker_id}_20pct_15utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    'src/AE_test/test_outputs/models/greedy_finetunev7/layerwisePretrain/{speaker_id}/dvector_ae-{speaker_id}_40pct_30utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    'src/AE_test/test_outputs/models/greedy_finetunev7/layerwisePretrain/{speaker_id}/dvector_ae-{speaker_id}_60pct_45utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    'src/AE_test/test_outputs/models/greedy_finetunev7/layerwisePretrain/{speaker_id}/dvector_ae-{speaker_id}_80pct_60utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
+    'src/AE_test/test_outputs/models/greedy_finetunev7/layerwisePretrain/{speaker_id}/dvector_ae-{speaker_id}_100pct_75utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-greedy_finetune_pretrain-2000_1e-5_200ep',
 ]
 
-# List of datasets to evaluate
-DATASET_LIST = [
-    'data/908_ov_test_noOther_main908_500_3-6-2026',
-    'data/908_ov_test_noOther_main908_babble_500_3-6-2026',
-    'data/908_ov_test_ov0pct_main908_500_3-6-2026',
-    'data/908_ov_test_ov0pct_main908_babble_500_3-6-2026',
-    'data/908_ov_test_ov100pct_main908_500_3-6-2026',
-    'data/908_ov_test_ov100pct_main908_babble_500_30-3-2026',
+# # Default datasets to evaluate when no per-speaker override is provided.
+# DATASET_LIST = [
+#     'data/61_ov_test_noOther_main61_500_31-5-2026',
+#     'data/61_ov_test_noOther_main61_babble_500_31-5-2026',
+#     'data/61_ov_test_ov0pct_main61_500_31-5-2026',
+#     'data/61_ov_test_ov0pct_main61_babble_500_31-5-2026',
+#     'data/61_ov_test_ov100pct_main61_500_31-5-2026',
+#     'data/61_ov_test_ov100pct_main61_babble_500_20-3-2026',
+# ]
+
+# Speaker-specific runs. Each entry defines a speaker ID and its dataset list.
+SPEAKER_RUNS = [
+    {
+        'speaker_id': '61',
+        'datasets': [
+            'data/61_ov_test_noOther_main61_500_31-5-2026',
+            'data/61_ov_test_noOther_main61_babble_500_31-5-2026',
+            'data/61_ov_test_ov0pct_main61_500_31-5-2026',
+            'data/61_ov_test_ov0pct_main61_babble_500_31-5-2026',
+            'data/61_ov_test_ov100pct_main61_500_31-5-2026',
+            'data/61_ov_test_ov100pct_main61_babble_500_20-3-2026',
+        ],
+    },
+    {
+        'speaker_id': '121',
+        'datasets': [
+            'data/121_ov_test_noOther_main121_500_1-6-2026',
+            'data/121_ov_test_noOther_main121_babble_500_1-6-2026',
+            'data/121_ov_test_ov0pct_main121_500_1-6-2026',
+            'data/121_ov_test_ov0pct_main121_babble_500_31-5-2026',
+            'data/121_ov_test_ov100pct_main121_500_1-6-2026',
+            'data/121_ov_test_ov100pct_main121_babble_500_27-3-2026',
+        ],
+    },
+    {
+        'speaker_id': '174',
+        'datasets': [
+            'data/174_ov_test_noOther_main174_500_3-6-2026',
+            'data/174_ov_test_noOther_main174_babble_500_3-6-2026',
+            'data/174_ov_test_ov0pct_main174_500_3-6-2026',
+            'data/174_ov_test_ov0pct_main174_babble_500_3-6-2026',
+            'data/174_ov_test_ov100pct_main174_500_3-6-2026',
+            'data/174_ov_test_ov100pct_main174_babble_500_24-3-2026',
+        ],
+    },
+    {
+        'speaker_id': '260',
+        'datasets': [
+            'data/260_ov_test_noOther_main260_500_3-6-2026',
+            'data/260_ov_test_noOther_main260_babble_500_3-6-2026',
+            'data/260_ov_test_ov0pct_main260_500_3-6-2026',
+            'data/260_ov_test_ov0pct_main260_babble_500_3-6-2026',
+            'data/260_ov_test_ov100pct_main260_500_3-6-2026',
+            'data/260_ov_test_ov100pct_main260_babble_500_29-3-2026',
+        ],
+    },
+    {
+        'speaker_id': '908',
+        'datasets': [
+            'data/908_ov_test_noOther_main908_500_3-6-2026',
+            'data/908_ov_test_noOther_main908_babble_500_3-6-2026',
+            'data/908_ov_test_ov0pct_main908_500_3-6-2026',
+            'data/908_ov_test_ov0pct_main908_babble_500_3-6-2026',
+            'data/908_ov_test_ov100pct_main908_500_3-6-2026',
+            'data/908_ov_test_ov100pct_main908_babble_500_30-3-2026',
+        ],
+    },
+    {
+        'speaker_id': '1221',
+        'datasets': [
+            'data/1221_ov_test_noOther_main1221_500_2-6-2026',
+            'data/1221_ov_test_noOther_main1221_babble_500_2-6-2026',
+            'data/1221_ov_test_ov0pct_main1221_500_2-6-2026',
+            'data/1221_ov_test_ov0pct_main1221_babble_500_2-6-2026',
+            'data/1221_ov_test_ov100pct_main1221_500_2-6-2026',
+            'data/1221_ov_test_ov100pct_main1221_babble_500_31-3-2026',
+        ],
+    },
+        {
+        'speaker_id': '1462',
+        'datasets': [
+            'data/1462_ov_test_noOther_main1462_500_2-6-2026',
+            'data/1462_ov_test_noOther_main1462_babble_500_2-6-2026',
+            'data/1462_ov_test_ov0pct_main1462_500_2-6-2026',
+            'data/1462_ov_test_ov0pct_main1462_babble_500_2-6-2026',
+            'data/1462_ov_test_ov100pct_main1462_500_2-6-2026',
+            'data/1462_ov_test_ov100pct_main1462_babble_500_23-3-2026',
+        ],
+    },
+    {
+        'speaker_id': '6829',
+        'datasets': [
+            'data/6829_ov_test_noOther_main6829_500_2-6-2026',
+            'data/6829_ov_test_noOther_main6829_babble_500_2-6-2026',
+            'data/6829_ov_test_ov0pct_main6829_500_2-6-2026',
+            'data/6829_ov_test_ov0pct_main6829_babble_500_2-6-2026',
+            'data/6829_ov_test_ov100pct_main6829_500_2-6-2026',
+            'data/6829_ov_test_ov100pct_main6829_babble_500_7-4-2026',
+        ],
+    },
 ]
 
-OUTPUT_CSV = 'model_evaluation_results/greedy_finetunev5_tt/direct_finetune/908/test.csv'
+OUTPUT_CSV_TEMPLATE = 'model_evaluation_results/greedy_finetunev7_ff/{speaker_id}/test.csv'
+CHECKPOINT_DIR = 'model_evaluation_results/greedy_finetunev7_ff/checkpoints'
 
 # Score recomputation settings (imported from vad_set_ae_eval.py)
 # WARNING: Requires wav.scp in each test directory or valid AUDIO_ROOT override
@@ -433,9 +526,85 @@ def append_result_to_csv(result, output_path, binary_mode=False):
         writer.writerow(result)
 
 
-def _build_eval_modes(effective_recompute_scores, quiet=False):
+def _get_speaker_checkpoint_path(speaker_id):
+    speaker_id = str(speaker_id).strip() or 'default'
+    checkpoint_path = Path(CHECKPOINT_DIR) / f"{speaker_id}.json"
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    return checkpoint_path
+
+
+def _load_speaker_checkpoint(speaker_id):
+    checkpoint_path = _get_speaker_checkpoint_path(speaker_id)
+    if not checkpoint_path.exists():
+        return {}
+    try:
+        with open(checkpoint_path, 'r', encoding='utf-8') as handle:
+            return json.load(handle)
+    except Exception:
+        return {}
+
+
+def _save_speaker_checkpoint(speaker_id, state):
+    checkpoint_path = _get_speaker_checkpoint_path(speaker_id)
+    with open(checkpoint_path, 'w', encoding='utf-8') as handle:
+        json.dump(state, handle, indent=2)
+
+
+def _get_speaker_checkpoint_path(speaker_id):
+    speaker_id = str(speaker_id).strip() or 'default'
+    checkpoint_path = Path(CHECKPOINT_DIR) / f"{speaker_id}.json"
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    return checkpoint_path
+
+
+def _load_speaker_checkpoint(speaker_id):
+    checkpoint_path = _get_speaker_checkpoint_path(speaker_id)
+    if not checkpoint_path.exists():
+        return {}
+    try:
+        with open(checkpoint_path, 'r', encoding='utf-8') as handle:
+            return json.load(handle)
+    except Exception:
+        return {}
+
+
+def _save_speaker_checkpoint(speaker_id, state):
+    checkpoint_path = _get_speaker_checkpoint_path(speaker_id)
+    with open(checkpoint_path, 'w', encoding='utf-8') as handle:
+        json.dump(state, handle, indent=2)
+
+
+def _resolve_ae_model_paths(ae_model_path_config, speaker_id=None):
+    speaker_id = str(speaker_id or '').strip()
+    if ae_model_path_config is None:
+        return []
+
+    if isinstance(ae_model_path_config, (str, os.PathLike)):
+        path_text = str(ae_model_path_config).strip()
+        if not path_text:
+            return []
+        if '{speaker_id}' in path_text:
+            return [path_text.format(speaker_id=speaker_id)] if speaker_id else [path_text]
+        return [path_text]
+
+    paths = []
+    for raw_path in ae_model_path_config:
+        path_text = str(raw_path).strip()
+        if not path_text:
+            continue
+        if '{speaker_id}' in path_text:
+            if speaker_id:
+                paths.append(path_text.format(speaker_id=speaker_id))
+            else:
+                paths.append(path_text)
+        else:
+            paths.append(path_text)
+    return paths
+
+
+def _build_eval_modes(effective_recompute_scores, quiet=False, speaker_id=None):
     eval_modes = []
-    ae_model_paths = _normalize_ae_model_paths(AE_MODEL_PATH)
+    ae_model_paths = _resolve_ae_model_paths(AE_MODEL_PATH, speaker_id=speaker_id)
 
     for ae_model_path in ae_model_paths:
         if not quiet:
@@ -500,11 +669,6 @@ if __name__ == '__main__':
     FORCE_INFERENCE_TARGET_SPEAKER_ID = None  # e.g. '84' to force inference target across all utterances
     FORCE_RECOMPUTE_SCORES_WITH_FORCED_TARGET = False  # Recommended: recompute scores when forcing target speaker
 
-    ae_model_paths = _normalize_ae_model_paths(AE_MODEL_PATH)
-    if not ae_model_paths and not INCLUDE_NO_AE:
-        print("ERROR: AE_MODEL_PATH is empty. Set AE_MODEL_PATH before running.")
-        sys.exit(1)
-
     force_target_enabled = (
         FORCE_INFERENCE_TARGET_SPEAKER_ID is not None and str(FORCE_INFERENCE_TARGET_SPEAKER_ID).strip() != ''
     )
@@ -512,364 +676,424 @@ if __name__ == '__main__':
         FORCE_RECOMPUTE_SCORES_WITH_FORCED_TARGET and force_target_enabled
     )
 
-    dataset_paths = list(DATASET_LIST)
-    if not dataset_paths:
-        print("ERROR: DATASET_LIST is empty.")
-        sys.exit(1)
-
     print("=" * 80)
     print("VAD SET-AE BATCH EVALUATION (MULTI-DATASET)")
     print("=" * 80)
     print("\nConfiguration:")
     print(f"   VAD Model: {VAD_MODEL_PATH}")
-    if ae_model_paths:
-        print(f"   AE Models ({len(ae_model_paths)}):")
-        for ae_model_path in ae_model_paths:
-            print(f"      - {ae_model_path}")
-    else:
-        print("   AE Models: None")
     print(f"   Include NO_AE: {INCLUDE_NO_AE}")
-    print(f"   Datasets: {len(dataset_paths)}")
+    print(f"   Speaker runs: {len(SPEAKER_RUNS)}")
     print(f"   Score Type: {SCORE_TYPE}")
     print(f"   Reconstruction enrolled transform (scoring): {TRANSFORM_ENROLLED_DVECTOR_FORSIMSCORE_IN_RECONSTRUCTION}")
     print(f"   Reconstruction enrolled transform (VAD input): {TRANSFORM_ENROLLED_VADINPUT_DVECTOR_IN_RECONSTRUCTION}")
     print(f"   Forced Inference Target: {FORCE_INFERENCE_TARGET_SPEAKER_ID}")
     if force_target_enabled and not RECOMPUTE_SCORES and FORCE_RECOMPUTE_SCORES_WITH_FORCED_TARGET:
         print("   WARNING: Forcing recompute_scores=True because forced target is enabled")
-    if FILTER_MAIN_SPEAKER:
-        print(f"   Main Speaker: {FILTER_MAIN_SPEAKER} (filtering enabled)")
-
-    # Rewrite previous run's global example label directory
-    example_labels_root = Path(EXAMPLE_LABELS_DIR)
-    if example_labels_root.exists():
-        shutil.rmtree(example_labels_root)
-    example_labels_root.mkdir(parents=True, exist_ok=True)
-
-    eval_modes = _build_eval_modes(effective_recompute_scores, quiet=QUIET)
-    multi_mode_output = len(eval_modes) > 1
-
-    print("\nOutput CSV(s):")
-    for eval_mode in eval_modes:
-        output_csv_path = _build_output_csv_path(OUTPUT_CSV, eval_mode['label'], multi_mode_output)
-        eval_mode['output_csv'] = str(output_csv_path)
-
-        existing_result_keys = set()
-        if output_csv_path.exists() and output_csv_path.stat().st_size > 0:
-            existing_result_keys = _load_existing_result_keys(output_csv_path)
-            if existing_result_keys and not QUIET:
-                print(
-                    f"   {eval_mode['label']}: {output_csv_path} "
-                    f"({len(existing_result_keys)} existing entries will be skipped)"
-                )
-            else:
-                print(f"   {eval_mode['label']}: {output_csv_path}")
-        else:
-            init_results_csv(output_csv_path, binary_mode=BINARY_MODE)
-
-        eval_mode['existing_result_keys'] = existing_result_keys
 
     # Store results for summary
     all_results = []
+    speaker_runs = SPEAKER_RUNS if SPEAKER_RUNS else [
+        {'speaker_id': str(FILTER_MAIN_SPEAKER or MAIN_SPEAKER_ID)}
+    ]
 
-    for dataset_idx, dataset_path in enumerate(dataset_paths):
-        dataset_name = Path(dataset_path).name
+    for speaker_run in speaker_runs:
+        speaker_id = str(speaker_run.get('speaker_id', 'default'))
+        dataset_paths = list(speaker_run.get('datasets'))
+        if not dataset_paths:
+            print(f"Skipping speaker {speaker_id}: no datasets configured")
+            continue
+
+        checkpoint_state = _load_speaker_checkpoint(speaker_id)
+        completed_dataset_indices = set(checkpoint_state.get('completed_dataset_indices', []))
+        if checkpoint_state.get('status') == 'completed':
+            print(f"Skipping speaker {speaker_id}: checkpoint shows completed")
+            continue
 
         print("\n" + "=" * 80)
-        print(f"Evaluating dataset {dataset_idx + 1}/{len(dataset_paths)}")
+        print(f"SPEAKER RUN: {speaker_id}")
         print("=" * 80)
-        print(f"   Dataset: {dataset_path}")
+        print(f"   Datasets ({len(dataset_paths)}):")
+        for dataset_path in dataset_paths:
+            print(f"      - {dataset_path}")
 
-        for mode_idx, eval_mode in enumerate(eval_modes):
-            model_name = eval_mode['label']
-            result_key = _build_result_key(dataset_path, model_name)
-            if result_key in eval_mode['existing_result_keys']:
-                if not QUIET:
-                    print(f"Skipping {dataset_name} / {model_name} (already in {eval_mode['output_csv']})")
+        ae_model_paths = _resolve_ae_model_paths(AE_MODEL_PATH, speaker_id=speaker_id)
+        if not ae_model_paths and not INCLUDE_NO_AE:
+            print(f"ERROR: No AE model paths resolved for speaker '{speaker_id}'.")
+            sys.exit(1)
+
+        print("\nConfiguration for speaker:")
+        if ae_model_paths:
+            print(f"   AE Models ({len(ae_model_paths)}):")
+            for ae_model_path in ae_model_paths:
+                print(f"      - {ae_model_path}")
+        else:
+            print("   AE Models: None")
+
+        eval_modes = _build_eval_modes(effective_recompute_scores, quiet=QUIET, speaker_id=speaker_id)
+        multi_mode_output = len(eval_modes) > 1
+
+        example_labels_root = Path(EXAMPLE_LABELS_DIR) / _sanitize_filename(speaker_id)
+        example_labels_root.mkdir(parents=True, exist_ok=True)
+
+        print("\nOutput CSV(s):")
+        for eval_mode in eval_modes:
+            output_csv_path = _build_output_csv_path(
+                OUTPUT_CSV_TEMPLATE.format(speaker_id=speaker_id),
+                eval_mode['label'],
+                multi_mode_output,
+            )
+            eval_mode['output_csv'] = str(output_csv_path)
+
+            existing_result_keys = set()
+            if output_csv_path.exists() and output_csv_path.stat().st_size > 0:
+                existing_result_keys = _load_existing_result_keys(output_csv_path)
+                if existing_result_keys and not QUIET:
+                    print(
+                        f"   {eval_mode['label']}: {output_csv_path} "
+                        f"({len(existing_result_keys)} existing entries will be skipped)"
+                    )
+                else:
+                    print(f"   {eval_mode['label']}: {output_csv_path}")
+            else:
+                init_results_csv(output_csv_path, binary_mode=BINARY_MODE)
+
+            eval_mode['existing_result_keys'] = existing_result_keys
+
+        active_filter_main_speaker = speaker_run.get('filter_main_speaker')
+        if active_filter_main_speaker is None and FILTER_MAIN_SPEAKER is not None:
+            active_filter_main_speaker = str(FILTER_MAIN_SPEAKER)
+        if active_filter_main_speaker is None:
+            active_filter_main_speaker = speaker_id
+        if active_filter_main_speaker:
+            print(f"   Main Speaker Override: {active_filter_main_speaker}")
+
+        for dataset_idx, dataset_path in enumerate(dataset_paths):
+            if dataset_idx in completed_dataset_indices:
+                print(f"Skipping dataset {dataset_idx + 1}/{len(dataset_paths)} for speaker {speaker_id} (checkpoint)")
                 continue
 
-            if mode_idx > 0:
-                print("-" * 80)
+            dataset_name = Path(dataset_path).name
 
-            print(f"   Eval mode: {model_name}")
-            if effective_recompute_scores:
-                if eval_mode['use_autoencoder']:
-                    print("   Score recomputation: ENABLED (scores will be computed with AE)")
+            print("\n" + "=" * 80)
+            print(f"Evaluating dataset {dataset_idx + 1}/{len(dataset_paths)} for speaker {speaker_id}")
+            print("=" * 80)
+            print(f"   Dataset: {dataset_path}")
+
+            for mode_idx, eval_mode in enumerate(eval_modes):
+                model_name = eval_mode['label']
+                result_key = _build_result_key(dataset_path, model_name)
+                if result_key in eval_mode['existing_result_keys']:
+                    if not QUIET:
+                        print(f"Skipping {dataset_name} / {model_name} (already in {eval_mode['output_csv']})")
+                    continue
+
+                if mode_idx > 0:
+                    print("-" * 80)
+
+                print(f"   Eval mode: {model_name}")
+                if effective_recompute_scores:
+                    if eval_mode['use_autoencoder']:
+                        print("   Score recomputation: ENABLED (scores will be computed with AE)")
+                    else:
+                        print("   Score recomputation: ENABLED (scores will be computed without AE)")
                 else:
-                    print("   Score recomputation: ENABLED (scores will be computed without AE)")
-            else:
-                print("   Score recomputation: DISABLED (using pre-computed scores.scp)")
+                    print("   Score recomputation: DISABLED (using pre-computed scores.scp)")
 
-            if AUDIO_ROOT_OVERRIDE is not None:
-                audio_root = AUDIO_ROOT_OVERRIDE
-            else:
-                audio_root = dataset_path if effective_recompute_scores else None
+                if AUDIO_ROOT_OVERRIDE is not None:
+                    audio_root = AUDIO_ROOT_OVERRIDE
+                else:
+                    audio_root = dataset_path if effective_recompute_scores else None
 
-            test_data = VadSETAEDataset(
-                dataset_path,
-                EMBED_PATH,
-                SCORE_TYPE,
-                autoencoder=eval_mode['autoencoder'],
-                use_autoencoder=eval_mode['use_autoencoder'],
-                use_ae_reconstruction=eval_mode['use_ae_reconstruction'],
-                transform_enrolled_in_reconstruction=(
+                test_data = VadSETAEDataset(
+                    dataset_path,
+                    EMBED_PATH,
+                    SCORE_TYPE,
+                    autoencoder=eval_mode['autoencoder'],
+                    use_autoencoder=eval_mode['use_autoencoder'],
+                    use_ae_reconstruction=eval_mode['use_ae_reconstruction'],
+                    transform_enrolled_in_reconstruction=(
+                        TRANSFORM_ENROLLED_DVECTOR_FORSIMSCORE_IN_RECONSTRUCTION and eval_mode['use_ae_reconstruction']
+                    ),
+                    transform_enrolled_vadinput_in_reconstruction=(
+                        TRANSFORM_ENROLLED_VADINPUT_DVECTOR_IN_RECONSTRUCTION and eval_mode['use_ae_reconstruction']
+                    ),
+                    recompute_scores=effective_recompute_scores,
+                    audio_root=audio_root,
+                    collect_similarity_scores=eval_mode['collect_similarity_scores'],
+                    similarity_score_sample_step=SIMILARITY_SCORE_SAMPLE_STEP,
+                    similarity_score_max_items=SIMILARITY_SCORE_MAX_UTTS,
+                )
+
+                _apply_forced_inference_target(
+                    test_data,
+                    FORCE_INFERENCE_TARGET_SPEAKER_ID,
+                    quiet=QUIET,
+                )
+
+                if active_filter_main_speaker:
+                    print(f"Filtering dataset for speaker: {active_filter_main_speaker}")
+                    original_indices = []
+                    for idx in range(len(test_data)):
+                        key = test_data.keys[idx]
+                        target_speaker = None
+                        if hasattr(test_data, 'targets') and key in test_data.targets:
+                            target_speaker = test_data.targets[key]
+                        if target_speaker is None and hasattr(test_data, 'keys') and idx < len(test_data.keys):
+                            target_speaker = test_data.keys[idx].split('-')[0]
+                        if str(target_speaker).strip() == str(active_filter_main_speaker):
+                            original_indices.append(idx)
+
+                    if len(original_indices) == 0:
+                        print(f"ERROR: No samples found for speaker '{active_filter_main_speaker}' in test set")
+                        sys.exit(1)
+
+                    test_data = Subset(test_data, original_indices)
+                    print(f"   Found {len(test_data)} samples for speaker {active_filter_main_speaker}")
+
+                print(f"Total samples: {len(test_data)}")
+
+                actual_dataset = test_data.dataset if isinstance(test_data, Subset) else test_data
+                actual_dataset.autoencoder = eval_mode['autoencoder']
+                actual_dataset.use_autoencoder = eval_mode['use_autoencoder']
+                actual_dataset.use_ae_reconstruction = eval_mode['use_ae_reconstruction']
+                actual_dataset.transform_enrolled_in_reconstruction = (
                     TRANSFORM_ENROLLED_DVECTOR_FORSIMSCORE_IN_RECONSTRUCTION and eval_mode['use_ae_reconstruction']
-                ),
-                transform_enrolled_vadinput_in_reconstruction=(
+                )
+                actual_dataset.transform_enrolled_vadinput_in_reconstruction = (
                     TRANSFORM_ENROLLED_VADINPUT_DVECTOR_IN_RECONSTRUCTION and eval_mode['use_ae_reconstruction']
-                ),
-                recompute_scores=effective_recompute_scores,
-                audio_root=audio_root,
-                collect_similarity_scores=eval_mode['collect_similarity_scores'],
-                similarity_score_sample_step=SIMILARITY_SCORE_SAMPLE_STEP,
-                similarity_score_max_items=SIMILARITY_SCORE_MAX_UTTS,
-            )
+                )
+                actual_dataset.collect_similarity_scores = eval_mode['collect_similarity_scores']
+                actual_dataset.similarity_score_sample_step = SIMILARITY_SCORE_SAMPLE_STEP
+                actual_dataset.similarity_score_max_items = SIMILARITY_SCORE_MAX_UTTS
+                actual_dataset.similarity_scores = {}
+                actual_dataset.similarity_scores_by_class = {0: [], 1: [], 2: []}
+                actual_dataset.similarity_score_num_utts = 0
 
-            _apply_forced_inference_target(
-                test_data,
-                FORCE_INFERENCE_TARGET_SPEAKER_ID,
-                quiet=QUIET,
-            )
-
-            if FILTER_MAIN_SPEAKER:
-                print(f"Filtering dataset for speaker: {FILTER_MAIN_SPEAKER}")
-                original_indices = []
-                for idx in range(len(test_data)):
-                    key = test_data.keys[idx]
-                    speaker_id = key.split('-')[0]
-                    if speaker_id == FILTER_MAIN_SPEAKER:
-                        original_indices.append(idx)
-
-                if len(original_indices) == 0:
-                    print(f"ERROR: No samples found for speaker '{FILTER_MAIN_SPEAKER}' in test set")
-                    sys.exit(1)
-
-                test_data = Subset(test_data, original_indices)
-                print(f"   Found {len(test_data)} samples for speaker {FILTER_MAIN_SPEAKER}")
-
-            print(f"Total samples: {len(test_data)}")
-
-            actual_dataset = test_data.dataset if isinstance(test_data, Subset) else test_data
-            actual_dataset.autoencoder = eval_mode['autoencoder']
-            actual_dataset.use_autoencoder = eval_mode['use_autoencoder']
-            actual_dataset.use_ae_reconstruction = eval_mode['use_ae_reconstruction']
-            actual_dataset.transform_enrolled_in_reconstruction = (
-                TRANSFORM_ENROLLED_DVECTOR_FORSIMSCORE_IN_RECONSTRUCTION and eval_mode['use_ae_reconstruction']
-            )
-            actual_dataset.transform_enrolled_vadinput_in_reconstruction = (
-                TRANSFORM_ENROLLED_VADINPUT_DVECTOR_IN_RECONSTRUCTION and eval_mode['use_ae_reconstruction']
-            )
-            actual_dataset.collect_similarity_scores = eval_mode['collect_similarity_scores']
-            actual_dataset.similarity_score_sample_step = SIMILARITY_SCORE_SAMPLE_STEP
-            actual_dataset.similarity_score_max_items = SIMILARITY_SCORE_MAX_UTTS
-            actual_dataset.similarity_scores = {}
-            actual_dataset.similarity_scores_by_class = {0: [], 1: [], 2: []}
-            actual_dataset.similarity_score_num_utts = 0
-
-            if eval_mode['use_autoencoder']:
-                if not QUIET:
-                    print("Reprocessing enrolled d-vectors with autoencoder...")
-                if eval_mode['use_ae_reconstruction']:
-                    need_reconstructed_enrolled = (
-                        TRANSFORM_ENROLLED_DVECTOR_FORSIMSCORE_IN_RECONSTRUCTION or
-                        TRANSFORM_ENROLLED_VADINPUT_DVECTOR_IN_RECONSTRUCTION
-                    )
-                    if need_reconstructed_enrolled:
+                if eval_mode['use_autoencoder']:
+                    if not QUIET:
+                        print("Reprocessing enrolled d-vectors with autoencoder...")
+                    if eval_mode['use_ae_reconstruction']:
+                        need_reconstructed_enrolled = (
+                            TRANSFORM_ENROLLED_DVECTOR_FORSIMSCORE_IN_RECONSTRUCTION or
+                            TRANSFORM_ENROLLED_VADINPUT_DVECTOR_IN_RECONSTRUCTION
+                        )
+                        if need_reconstructed_enrolled:
+                            actual_dataset.processed_embed = {}
+                            eval_mode['autoencoder'].eval()
+                            with torch.no_grad():
+                                for target, dvector in actual_dataset.embed.items():
+                                    dvector_tensor = torch.FloatTensor(dvector).unsqueeze(0).to(device)
+                                    reconstructed = eval_mode['autoencoder'](dvector_tensor)
+                                    actual_dataset.processed_embed[target] = reconstructed.cpu().numpy().squeeze()
+                            if not QUIET:
+                                print(
+                                    f"   Reconstructed {len(actual_dataset.processed_embed)} enrolled d-vectors (256-dim)"
+                                )
+                        else:
+                            actual_dataset.processed_embed = None
+                            if not QUIET:
+                                print("   Keeping enrolled d-vectors original (256-dim)")
+                    else:
                         actual_dataset.processed_embed = {}
                         eval_mode['autoencoder'].eval()
                         with torch.no_grad():
                             for target, dvector in actual_dataset.embed.items():
                                 dvector_tensor = torch.FloatTensor(dvector).unsqueeze(0).to(device)
-                                reconstructed = eval_mode['autoencoder'](dvector_tensor)
-                                actual_dataset.processed_embed[target] = reconstructed.cpu().numpy().squeeze()
+                                compressed = eval_mode['autoencoder'].encode(dvector_tensor)
+                                actual_dataset.processed_embed[target] = compressed.cpu().numpy().squeeze()
                         if not QUIET:
                             print(
-                                f"   Reconstructed {len(actual_dataset.processed_embed)} enrolled d-vectors (256-dim)"
+                                f"   Compressed {len(actual_dataset.processed_embed)} enrolled d-vectors "
+                                f"({eval_mode['encoded_dim']}-dim)"
                             )
-                    else:
-                        actual_dataset.processed_embed = None
-                        if not QUIET:
-                            print("   Keeping enrolled d-vectors original (256-dim)")
                 else:
-                    actual_dataset.processed_embed = {}
-                    eval_mode['autoencoder'].eval()
-                    with torch.no_grad():
-                        for target, dvector in actual_dataset.embed.items():
-                            dvector_tensor = torch.FloatTensor(dvector).unsqueeze(0).to(device)
-                            compressed = eval_mode['autoencoder'].encode(dvector_tensor)
-                            actual_dataset.processed_embed[target] = compressed.cpu().numpy().squeeze()
+                    actual_dataset.processed_embed = None
                     if not QUIET:
-                        print(
-                            f"   Compressed {len(actual_dataset.processed_embed)} enrolled d-vectors "
-                            f"({eval_mode['encoded_dim']}-dim)"
-                        )
-            else:
-                actual_dataset.processed_embed = None
+                        print("Using original enrolled d-vectors (NO_AE)")
+
+                test_loader = DataLoader(
+                    test_data,
+                    batch_size=BATCH_SIZE,
+                    shuffle=False,
+                    num_workers=NUM_WORKERS,
+                    collate_fn=pad_collate_with_metadata,
+                )
+
                 if not QUIET:
-                    print("Using original enrolled d-vectors (NO_AE)")
+                    print("\nLoading VAD model...")
+                    print(f"   Model path: {VAD_MODEL_PATH}")
+                    print(f"   Expected input dim: {eval_mode['input_dim']}")
 
-            test_loader = DataLoader(
-                test_data,
-                batch_size=BATCH_SIZE,
-                shuffle=False,
-                num_workers=NUM_WORKERS,
-                collate_fn=pad_collate_with_metadata,
+                hidden_dim = 64
+                num_layers = 2
+                out_dim = 3
+
+                vad_model = PersonalVAD(eval_mode['input_dim'], hidden_dim, num_layers, out_dim, use_fc=True, linear=False)
+
+                if device == torch.device('cuda') and torch.cuda.is_available():
+                    checkpoint = torch.load(VAD_MODEL_PATH)
+                else:
+                    checkpoint = torch.load(VAD_MODEL_PATH, map_location='cpu')
+
+                if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
+                    state_dict = checkpoint['model_state_dict']
+                    if 'lstm.weight_ih_l0' in state_dict:
+                        trained_input_dim = state_dict['lstm.weight_ih_l0'].shape[1]
+                        if trained_input_dim != eval_mode['input_dim']:
+                            print("ERROR: Input dimension mismatch!")
+                            print(f"   Model trained with: {trained_input_dim}-dim")
+                            print(f"   Current config expects: {eval_mode['input_dim']}-dim")
+                            print(f"   VAD model: {VAD_MODEL_PATH}")
+                            print(f"   Eval mode: {model_name}")
+                            print(f"   AE model: {eval_mode['ae_model_path']}")
+                            sys.exit(1)
+                    vad_model.load_state_dict(state_dict)
+                else:
+                    vad_model.load_state_dict(checkpoint)
+
+                vad_model = vad_model.to(device)
+
+                if not QUIET:
+                    print("\nEVALUATING")
+
+                acc, mAP, out_AP, avg_precision, avg_recall, avg_f1, eval_details = evaluate_vad_with_ae(
+                    vad_model,
+                    test_loader,
+                    device,
+                    show_examples=False,
+                    n_examples=N_EXAMPLE_UTTERANCES,
+                    binary_mode=BINARY_MODE,
+                    show_class_stats=False,
+                    return_details=True,
+                )
+
+                per_class_precision = eval_details['per_class_precision']
+                per_class_recall = eval_details['per_class_recall']
+                per_class_f1 = eval_details['per_class_f1']
+                conf_cm_pct = eval_details['confusion_matrix_pct_total']
+                example_sequences = eval_details['example_sequences']
+
+                if eval_mode['collect_similarity_scores']:
+                    plot_name = f"{model_name}_{dataset_name}"
+                    plot_path = _plot_similarity_scores(
+                        plot_name,
+                        getattr(actual_dataset, 'similarity_scores_by_class', {}),
+                        SIMILARITY_PLOTS_DIR,
+                    )
+                    if plot_path and not QUIET:
+                        print(f"Similarity plot: {plot_path}")
+
+                dataset_label_dir = example_labels_root / _sanitize_filename(dataset_name)
+                examples_out_dir = _export_example_label_files(
+                    dataset_label_dir,
+                    model_name,
+                    example_sequences,
+                    frame_step_sec=LABEL_FRAME_STEP_SEC,
+                )
+                if not QUIET:
+                    print(f"Saved {len(example_sequences)} example label sets to: {examples_out_dir}")
+
+                csv_row = {
+                    'dataset_name': dataset_name,
+                    'dataset_path': dataset_path,
+                    'n_samples': f"{len(test_data)}",
+                    'ae_model_name': model_name,
+                    'ae_model_path': eval_mode['ae_model_path'],
+                    'mAP': f"{mAP * 100:.2f}",
+                    'accuracy': f"{acc:.2f}",
+                    'precision_micro': f"{avg_precision * 100:.2f}",
+                    'recall_micro': f"{avg_recall * 100:.2f}",
+                    'f1_micro': f"{avg_f1 * 100:.2f}",
+                }
+
+                if BINARY_MODE:
+                    csv_row['AP_NonTarget'] = f"{out_AP[0] * 100:.2f}"
+                    csv_row['AP_Target'] = f"{out_AP[1] * 100:.2f}"
+                    csv_row['precision_NonTarget'] = f"{per_class_precision[0] * 100:.2f}"
+                    csv_row['recall_NonTarget'] = f"{per_class_recall[0] * 100:.2f}"
+                    csv_row['f1_NonTarget'] = f"{per_class_f1[0] * 100:.2f}"
+                    csv_row['precision_Target'] = f"{per_class_precision[1] * 100:.2f}"
+                    csv_row['recall_Target'] = f"{per_class_recall[1] * 100:.2f}"
+                    csv_row['f1_Target'] = f"{per_class_f1[1] * 100:.2f}"
+                    csv_row['conf_NT_as_NT'] = f"{conf_cm_pct[0, 0]:.4f}"
+                    csv_row['conf_NT_as_T'] = f"{conf_cm_pct[0, 1]:.4f}"
+                    csv_row['conf_T_as_NT'] = f"{conf_cm_pct[1, 0]:.4f}"
+                    csv_row['conf_T_as_T'] = f"{conf_cm_pct[1, 1]:.4f}"
+                else:
+                    csv_row['AP_NS'] = f"{out_AP[0] * 100:.2f}"
+                    csv_row['AP_NTSS'] = f"{out_AP[1] * 100:.2f}"
+                    csv_row['AP_TSS'] = f"{out_AP[2] * 100:.2f}"
+                    csv_row['precision_NS'] = f"{per_class_precision[0] * 100:.2f}"
+                    csv_row['recall_NS'] = f"{per_class_recall[0] * 100:.2f}"
+                    csv_row['f1_NS'] = f"{per_class_f1[0] * 100:.2f}"
+                    csv_row['precision_NTSS'] = f"{per_class_precision[1] * 100:.2f}"
+                    csv_row['recall_NTSS'] = f"{per_class_recall[1] * 100:.2f}"
+                    csv_row['f1_NTSS'] = f"{per_class_f1[1] * 100:.2f}"
+                    csv_row['precision_TSS'] = f"{per_class_precision[2] * 100:.2f}"
+                    csv_row['recall_TSS'] = f"{per_class_recall[2] * 100:.2f}"
+                    csv_row['f1_TSS'] = f"{per_class_f1[2] * 100:.2f}"
+                    csv_row['conf_NSasNS'] = f"{conf_cm_pct[0, 0]:.4f}"
+                    csv_row['conf_NSasNTSS'] = f"{conf_cm_pct[0, 1]:.4f}"
+                    csv_row['conf_NSasTSS'] = f"{conf_cm_pct[0, 2]:.4f}"
+                    csv_row['conf_NTSSasNS'] = f"{conf_cm_pct[1, 0]:.4f}"
+                    csv_row['conf_NTSSasNTSS'] = f"{conf_cm_pct[1, 1]:.4f}"
+                    csv_row['conf_NTSSasTSS'] = f"{conf_cm_pct[1, 2]:.4f}"
+                    csv_row['conf_TSSasNS'] = f"{conf_cm_pct[2, 0]:.4f}"
+                    csv_row['conf_TSSasNTSS'] = f"{conf_cm_pct[2, 1]:.4f}"
+                    csv_row['conf_TSSasTSS'] = f"{conf_cm_pct[2, 2]:.4f}"
+
+                append_result_to_csv(csv_row, eval_mode['output_csv'], binary_mode=BINARY_MODE)
+                eval_mode['existing_result_keys'].add(result_key)
+                all_results.append(csv_row)
+
+                print("\n" + "=" * 80)
+                print(f"RESULTS: {dataset_name} [{model_name}]")
+                print("=" * 80)
+                if BINARY_MODE:
+                    print(
+                        f"Accuracy: {acc:.2f}% | mAP: {mAP*100:.2f}% | "
+                        f"P/R/F1 (micro): [{avg_precision*100:.2f}%, {avg_recall*100:.2f}%, {avg_f1*100:.2f}%] | "
+                        f"AP [Non-Target/Target]: [{out_AP[0]*100:.2f}%, {out_AP[1]*100:.2f}%]"
+                    )
+                    print(
+                        f"Per-class P/R/F1 [Non-Target]: [{per_class_precision[0]*100:.2f}%, {per_class_recall[0]*100:.2f}%, {per_class_f1[0]*100:.2f}%] | "
+                        f"[Target]: [{per_class_precision[1]*100:.2f}%, {per_class_recall[1]*100:.2f}%, {per_class_f1[1]*100:.2f}%]"
+                    )
+                    if SHOW_CONFUSION_MATRIX_PERCENT:
+                        _print_confusion_matrix_pct(conf_cm_pct, binary_mode=True)
+                else:
+                    print(
+                        f"Accuracy: {acc:.2f}% | mAP: {mAP*100:.2f}% | "
+                        f"P/R/F1 (micro): [{avg_precision*100:.2f}%, {avg_recall*100:.2f}%, {avg_f1*100:.2f}%] | "
+                        f"AP [NS/NTSS/TSS]: [{out_AP[0]*100:.2f}%, {out_AP[1]*100:.2f}%, {out_AP[2]*100:.2f}%]"
+                    )
+                    print(
+                        f"Per-class P/R/F1 [NS]: [{per_class_precision[0]*100:.2f}%, {per_class_recall[0]*100:.2f}%, {per_class_f1[0]*100:.2f}%] | "
+                        f"[NTSS]: [{per_class_precision[1]*100:.2f}%, {per_class_recall[1]*100:.2f}%, {per_class_f1[1]*100:.2f}%] | "
+                        f"[TSS]: [{per_class_precision[2]*100:.2f}%, {per_class_recall[2]*100:.2f}%, {per_class_f1[2]*100:.2f}%]"
+                    )
+                    if SHOW_CONFUSION_MATRIX_PERCENT:
+                        _print_confusion_matrix_pct(conf_cm_pct, binary_mode=False)
+
+            completed_dataset_indices.add(dataset_idx)
+            _save_speaker_checkpoint(
+                speaker_id,
+                {
+                    'speaker_id': speaker_id,
+                    'completed_dataset_indices': sorted(completed_dataset_indices),
+                    'status': 'completed' if len(completed_dataset_indices) >= len(dataset_paths) else 'in_progress',
+                },
             )
 
-            if not QUIET:
-                print("\nLoading VAD model...")
-                print(f"   Model path: {VAD_MODEL_PATH}")
-                print(f"   Expected input dim: {eval_mode['input_dim']}")
-
-            hidden_dim = 64
-            num_layers = 2
-            out_dim = 3
-
-            vad_model = PersonalVAD(eval_mode['input_dim'], hidden_dim, num_layers, out_dim, use_fc=True, linear=False)
-
-            if device == torch.device('cuda') and torch.cuda.is_available():
-                checkpoint = torch.load(VAD_MODEL_PATH)
-            else:
-                checkpoint = torch.load(VAD_MODEL_PATH, map_location='cpu')
-
-            if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-                state_dict = checkpoint['model_state_dict']
-                if 'lstm.weight_ih_l0' in state_dict:
-                    trained_input_dim = state_dict['lstm.weight_ih_l0'].shape[1]
-                    if trained_input_dim != eval_mode['input_dim']:
-                        print("ERROR: Input dimension mismatch!")
-                        print(f"   Model trained with: {trained_input_dim}-dim")
-                        print(f"   Current config expects: {eval_mode['input_dim']}-dim")
-                        print(f"   VAD model: {VAD_MODEL_PATH}")
-                        print(f"   Eval mode: {model_name}")
-                        print(f"   AE model: {eval_mode['ae_model_path']}")
-                        sys.exit(1)
-                vad_model.load_state_dict(state_dict)
-            else:
-                vad_model.load_state_dict(checkpoint)
-
-            vad_model = vad_model.to(device)
-
-            if not QUIET:
-                print("\nEVALUATING")
-
-            acc, mAP, out_AP, avg_precision, avg_recall, avg_f1, eval_details = evaluate_vad_with_ae(
-                vad_model,
-                test_loader,
-                device,
-                show_examples=False,
-                n_examples=N_EXAMPLE_UTTERANCES,
-                binary_mode=BINARY_MODE,
-                show_class_stats=False,
-                return_details=True,
+        if len(completed_dataset_indices) >= len(dataset_paths):
+            _save_speaker_checkpoint(
+                speaker_id,
+                {
+                    'speaker_id': speaker_id,
+                    'completed_dataset_indices': sorted(completed_dataset_indices),
+                    'status': 'completed',
+                },
             )
-
-            per_class_precision = eval_details['per_class_precision']
-            per_class_recall = eval_details['per_class_recall']
-            per_class_f1 = eval_details['per_class_f1']
-            conf_cm_pct = eval_details['confusion_matrix_pct_total']
-            example_sequences = eval_details['example_sequences']
-
-            if eval_mode['collect_similarity_scores']:
-                plot_name = f"{model_name}_{dataset_name}"
-                plot_path = _plot_similarity_scores(
-                    plot_name,
-                    getattr(actual_dataset, 'similarity_scores_by_class', {}),
-                    SIMILARITY_PLOTS_DIR,
-                )
-                if plot_path and not QUIET:
-                    print(f"Similarity plot: {plot_path}")
-
-            dataset_label_dir = example_labels_root / _sanitize_filename(dataset_name)
-            examples_out_dir = _export_example_label_files(
-                dataset_label_dir,
-                model_name,
-                example_sequences,
-                frame_step_sec=LABEL_FRAME_STEP_SEC,
-            )
-            if not QUIET:
-                print(f"Saved {len(example_sequences)} example label sets to: {examples_out_dir}")
-
-            csv_row = {
-                'dataset_name': dataset_name,
-                'dataset_path': dataset_path,
-                'n_samples': f"{len(test_data)}",
-                'ae_model_name': model_name,
-                'ae_model_path': eval_mode['ae_model_path'],
-                'mAP': f"{mAP * 100:.2f}",
-                'accuracy': f"{acc:.2f}",
-                'precision_micro': f"{avg_precision * 100:.2f}",
-                'recall_micro': f"{avg_recall * 100:.2f}",
-                'f1_micro': f"{avg_f1 * 100:.2f}",
-            }
-
-            if BINARY_MODE:
-                csv_row['AP_NonTarget'] = f"{out_AP[0] * 100:.2f}"
-                csv_row['AP_Target'] = f"{out_AP[1] * 100:.2f}"
-                csv_row['precision_NonTarget'] = f"{per_class_precision[0] * 100:.2f}"
-                csv_row['recall_NonTarget'] = f"{per_class_recall[0] * 100:.2f}"
-                csv_row['f1_NonTarget'] = f"{per_class_f1[0] * 100:.2f}"
-                csv_row['precision_Target'] = f"{per_class_precision[1] * 100:.2f}"
-                csv_row['recall_Target'] = f"{per_class_recall[1] * 100:.2f}"
-                csv_row['f1_Target'] = f"{per_class_f1[1] * 100:.2f}"
-                csv_row['conf_NT_as_NT'] = f"{conf_cm_pct[0, 0]:.4f}"
-                csv_row['conf_NT_as_T'] = f"{conf_cm_pct[0, 1]:.4f}"
-                csv_row['conf_T_as_NT'] = f"{conf_cm_pct[1, 0]:.4f}"
-                csv_row['conf_T_as_T'] = f"{conf_cm_pct[1, 1]:.4f}"
-            else:
-                csv_row['AP_NS'] = f"{out_AP[0] * 100:.2f}"
-                csv_row['AP_NTSS'] = f"{out_AP[1] * 100:.2f}"
-                csv_row['AP_TSS'] = f"{out_AP[2] * 100:.2f}"
-                csv_row['precision_NS'] = f"{per_class_precision[0] * 100:.2f}"
-                csv_row['recall_NS'] = f"{per_class_recall[0] * 100:.2f}"
-                csv_row['f1_NS'] = f"{per_class_f1[0] * 100:.2f}"
-                csv_row['precision_NTSS'] = f"{per_class_precision[1] * 100:.2f}"
-                csv_row['recall_NTSS'] = f"{per_class_recall[1] * 100:.2f}"
-                csv_row['f1_NTSS'] = f"{per_class_f1[1] * 100:.2f}"
-                csv_row['precision_TSS'] = f"{per_class_precision[2] * 100:.2f}"
-                csv_row['recall_TSS'] = f"{per_class_recall[2] * 100:.2f}"
-                csv_row['f1_TSS'] = f"{per_class_f1[2] * 100:.2f}"
-                csv_row['conf_NSasNS'] = f"{conf_cm_pct[0, 0]:.4f}"
-                csv_row['conf_NSasNTSS'] = f"{conf_cm_pct[0, 1]:.4f}"
-                csv_row['conf_NSasTSS'] = f"{conf_cm_pct[0, 2]:.4f}"
-                csv_row['conf_NTSSasNS'] = f"{conf_cm_pct[1, 0]:.4f}"
-                csv_row['conf_NTSSasNTSS'] = f"{conf_cm_pct[1, 1]:.4f}"
-                csv_row['conf_NTSSasTSS'] = f"{conf_cm_pct[1, 2]:.4f}"
-                csv_row['conf_TSSasNS'] = f"{conf_cm_pct[2, 0]:.4f}"
-                csv_row['conf_TSSasNTSS'] = f"{conf_cm_pct[2, 1]:.4f}"
-                csv_row['conf_TSSasTSS'] = f"{conf_cm_pct[2, 2]:.4f}"
-
-            append_result_to_csv(csv_row, eval_mode['output_csv'], binary_mode=BINARY_MODE)
-            eval_mode['existing_result_keys'].add(result_key)
-            all_results.append(csv_row)
-
-            print("\n" + "=" * 80)
-            print(f"RESULTS: {dataset_name} [{model_name}]")
-            print("=" * 80)
-            if BINARY_MODE:
-                print(
-                    f"Accuracy: {acc:.2f}% | mAP: {mAP*100:.2f}% | "
-                    f"P/R/F1 (micro): [{avg_precision*100:.2f}%, {avg_recall*100:.2f}%, {avg_f1*100:.2f}%] | "
-                    f"AP [Non-Target/Target]: [{out_AP[0]*100:.2f}%, {out_AP[1]*100:.2f}%]"
-                )
-                print(
-                    f"Per-class P/R/F1 [Non-Target]: [{per_class_precision[0]*100:.2f}%, {per_class_recall[0]*100:.2f}%, {per_class_f1[0]*100:.2f}%] | "
-                    f"[Target]: [{per_class_precision[1]*100:.2f}%, {per_class_recall[1]*100:.2f}%, {per_class_f1[1]*100:.2f}%]"
-                )
-                if SHOW_CONFUSION_MATRIX_PERCENT:
-                    _print_confusion_matrix_pct(conf_cm_pct, binary_mode=True)
-            else:
-                print(
-                    f"Accuracy: {acc:.2f}% | mAP: {mAP*100:.2f}% | "
-                    f"P/R/F1 (micro): [{avg_precision*100:.2f}%, {avg_recall*100:.2f}%, {avg_f1*100:.2f}%] | "
-                    f"AP [NS/NTSS/TSS]: [{out_AP[0]*100:.2f}%, {out_AP[1]*100:.2f}%, {out_AP[2]*100:.2f}%]"
-                )
-                print(
-                    f"Per-class P/R/F1 [NS]: [{per_class_precision[0]*100:.2f}%, {per_class_recall[0]*100:.2f}%, {per_class_f1[0]*100:.2f}%] | "
-                    f"[NTSS]: [{per_class_precision[1]*100:.2f}%, {per_class_recall[1]*100:.2f}%, {per_class_f1[1]*100:.2f}%] | "
-                    f"[TSS]: [{per_class_precision[2]*100:.2f}%, {per_class_recall[2]*100:.2f}%, {per_class_f1[2]*100:.2f}%]"
-                )
-                if SHOW_CONFUSION_MATRIX_PERCENT:
-                    _print_confusion_matrix_pct(conf_cm_pct, binary_mode=False)
 
     print("\n" + "=" * 80)
     print("BATCH EVALUATION SUMMARY")

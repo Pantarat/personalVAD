@@ -8,7 +8,7 @@ For run n:
 - MODEL_SAVE_DIR changes per run
 """
 
-import train_dvector_autoencoder_finetune_greedy as ae
+import train_dvector_autoencoder_finetune_greedy_v2 as ae
 
 
 # -----------------------------------------------------------------------------
@@ -25,7 +25,7 @@ OVERLAP_BASE = f"test_outputs/data/{SPEAKER_ID}"
 SINGLE_SPEAKER_BASE = f"../../data/speaker_{SPEAKER_ID}"
 
 # Where each finetuned model run will be saved
-MODEL_BASE = f"test_outputs/models/greedy_finetunev5/direct_finetune/{SPEAKER_ID}"
+MODEL_BASE = f"test_outputs/models/greedy_finetunev7/layerwisePretrain/{SPEAKER_ID}"
 
 # Initial pretrained model used for all runs
 # (set to None to train each run from scratch)
@@ -37,7 +37,7 @@ INITIAL_PRETRAINED_MODEL_PATH = ae.PRETRAINED_MODEL_PATH
 # -----------------------------------------------------------------------------
 def main():
     # for n in range(START_TRAIN, MAX_TRAIN + 1):
-    for n in [1, 2, 3, 4, 5, 10, 15, 20, 25]:  # Optional: only run specific increments
+    for n in [1, 5, 10, 15, 20, 25]:  # Optional: only run specific increments
         # 1) train1..trainn for clean target data
         ae.SINGLE_SPEAKER_DATASETS = [
             f"{SINGLE_SPEAKER_BASE}/train{i}" for i in range(1, n + 1)

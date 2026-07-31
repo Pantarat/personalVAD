@@ -4,11 +4,11 @@ Greedy layer-wise pretraining + full-stack finetuning for denoising d-vector aut
 
 Process:
 1) Extract (noisy_dvector, clean_dvector) pairs from LibriSpeech + MUSAN babble.
-2) Greedy layer-wise pretrain shallow AEs:
-   - Layer k is trained to map H_{k-1}(noisy) -> H_{k-1}(clean).
-   - Hidden representation from encoder is used as input for next layer.
-3) Assemble stacked autoencoder from pretrained layers.
-4) Finetune the full stack end-to-end on noisy -> clean reconstruction.
+2) Optionally greedy layer-wise pretrain shallow AEs:
+    - Layer k is trained to map H_{k-1}(noisy) -> H_{k-1}(clean).
+    - Hidden representation from encoder is used as input for next layer.
+3) Assemble the stacked autoencoder.
+4) Train the full stack end-to-end on noisy -> clean reconstruction.
 """
 
 import copy
@@ -19,6 +19,7 @@ import time
 import warnings
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn as nn
@@ -62,10 +63,12 @@ MUSAN_BABBLE_SNR_RANGE_DB = (20.0, 17.0, 15.0, 13.0)
 INCLUDE_NOISE_ONLY_SILENCE_TARGET_PAIRS = True  # If True, includes extra pairs where noise is mixed with silence and target is the clean silence d-vector (instead of zero vector)
 INCLUDE_CLEAN_IDENTITY_PAIRS = False  # If True, add clean->clean identity pairs to training data
 
-MODEL_SAVE_DIR = "test_outputs/models/greedy/dvector_ae_greedy_layerwise_15_6-5-26"
+# MODEL_SAVE_DIR = "test_outputs/models/greedy/dvector_ae_greedy_layerwise_15_6-5-26"
+MODEL_SAVE_DIR = "test_outputs/models/stacked/dvector_ae_stacked_1_17-7-26"
 
 # Greedy layer-wise architecture (one hidden layer per stage)
 GREEDY_LAYER_HIDDEN_DIMS = [192, 192]
+ENABLE_GREEDY_LAYERWISE_PRETRAINING = False
 DROPOUT_RATE = 0.1
 NORM_TYPE = "layernorm"
 ACTIVATION_TYPE = "tanh"  # tanh or relu
@@ -174,10 +177,34 @@ class ShallowDenoisingAE(nn.Module):
 class StackedDenoisingAE(nn.Module):
     """Stacked autoencoder assembled from pretrained shallow AEs."""
 
-    def __init__(self, pretrained_layers):
+    def __init__(self, pretrained_layers=None, input_dim=None, hidden_dims=None, dropout_rate=0.1, norm_type="batchnorm", activation_type="tanh"):
         super().__init__()
-        self.encoders = nn.ModuleList([copy.deepcopy(layer.encoder) for layer in pretrained_layers])
-        self.decoders = nn.ModuleList([copy.deepcopy(layer.decoder) for layer in pretrained_layers])
+        if pretrained_layers is not None:
+            self.encoders = nn.ModuleList([copy.deepcopy(layer.encoder) for layer in pretrained_layers])
+            self.decoders = nn.ModuleList([copy.deepcopy(layer.decoder) for layer in pretrained_layers])
+            return
+
+        if input_dim is None or hidden_dims is None:
+            raise ValueError("Either pretrained_layers or both input_dim and hidden_dims must be provided")
+
+        hidden_dims = [int(dim) for dim in hidden_dims]
+        encoder_layers = []
+        decoder_layers = []
+        current_dim = int(input_dim)
+        for hidden_dim in hidden_dims:
+            layer = ShallowDenoisingAE(
+                input_dim=current_dim,
+                hidden_dim=hidden_dim,
+                dropout_rate=dropout_rate,
+                norm_type=norm_type,
+                activation_type=activation_type,
+            )
+            encoder_layers.append(layer.encoder)
+            decoder_layers.append(layer.decoder)
+            current_dim = hidden_dim
+
+        self.encoders = nn.ModuleList(encoder_layers)
+        self.decoders = nn.ModuleList(decoder_layers)
 
     def forward(self, x):
         out = x
@@ -289,10 +316,29 @@ def _eval_epoch(model, loader, device, mse_weight, cos_weight):
     return total_loss / n_batches, total_mse / n_batches, total_cos / n_batches
 
 
-def _train_model(model, train_loader, val_loader, device, lr, num_epochs, save_path):
+def _save_loss_plot(history, save_path, title):
+    epochs = [row["epoch"] for row in history]
+    train_loss = [row["train_loss"] for row in history]
+    val_loss = [row["val_loss"] for row in history]
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    ax.plot(epochs, train_loss, label="train_loss", linewidth=2)
+    ax.plot(epochs, val_loss, label="val_loss", linewidth=2)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Loss")
+    ax.set_title(title)
+    ax.grid(True, linestyle="--", alpha=0.4)
+    ax.legend()
+    fig.tight_layout()
+    fig.savefig(save_path, dpi=200, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _train_model(model, train_loader, val_loader, device, lr, num_epochs, save_path, plot_path=None, plot_title=None):
     optimizer = optim.Adam(model.parameters(), lr=lr)
     best_val = float("inf")
     patience = 0
+    history = []
 
     for epoch in range(num_epochs):
         mse_w, cos_w = _loss_weights_for_epoch(epoch, num_epochs)
@@ -308,6 +354,18 @@ def _train_model(model, train_loader, val_loader, device, lr, num_epochs, save_p
             f"Weights mse={mse_w:.2f}, cos={cos_w:.2f}"
         )
 
+        history.append(
+            {
+                "epoch": int(epoch + 1),
+                "train_loss": float(train_loss),
+                "val_loss": float(val_loss),
+                "train_mse": float(train_mse),
+                "val_mse": float(val_mse),
+                "train_cos": float(train_cos),
+                "val_cos": float(val_cos),
+            }
+        )
+
         if val_loss < best_val:
             best_val = val_loss
             torch.save({"model_state_dict": model.state_dict(), "val_loss": val_loss}, save_path)
@@ -318,6 +376,13 @@ def _train_model(model, train_loader, val_loader, device, lr, num_epochs, save_p
         if patience >= EARLY_STOPPING_PATIENCE:
             print(f"Early stopping at epoch {epoch + 1}")
             break
+
+    if plot_path is not None and history:
+        _save_loss_plot(
+            history=history,
+            save_path=plot_path,
+            title=plot_title or "Training vs Validation Loss",
+        )
 
     return best_val
 
@@ -362,7 +427,18 @@ def greedy_pretrain_layers(noisy_dvectors, clean_dvectors, input_dim, device, sa
         val_loader = DataLoader(val_ds, batch_size=BATCH_SIZE, shuffle=False)
 
         layer_ckpt = save_dir / f"greedy_layer_{idx + 1}.pth"
-        _train_model(layer, train_loader, val_loader, device, LEARNING_RATE_PRETRAIN, NUM_EPOCHS_PRETRAIN, layer_ckpt)
+        layer_plot = save_dir / f"greedy_layer_{idx + 1}_loss.png"
+        _train_model(
+            layer,
+            train_loader,
+            val_loader,
+            device,
+            LEARNING_RATE_PRETRAIN,
+            NUM_EPOCHS_PRETRAIN,
+            layer_ckpt,
+            plot_path=layer_plot,
+            plot_title=f"Greedy Layer {idx + 1} Loss",
+        )
         pretrained_layers.append(layer)
 
         current_noisy = _encode_dataset(layer, current_noisy, BATCH_SIZE, device)
@@ -370,6 +446,19 @@ def greedy_pretrain_layers(noisy_dvectors, clean_dvectors, input_dim, device, sa
         input_dim = hidden_dim
 
     return pretrained_layers
+
+
+def build_stacked_model(input_dim, device, pretrained_layers=None):
+    if pretrained_layers is not None:
+        return StackedDenoisingAE(pretrained_layers=pretrained_layers).to(device)
+
+    return StackedDenoisingAE(
+        input_dim=input_dim,
+        hidden_dims=GREEDY_LAYER_HIDDEN_DIMS,
+        dropout_rate=DROPOUT_RATE,
+        norm_type=NORM_TYPE,
+        activation_type=ACTIVATION_TYPE,
+    ).to(device)
 
 
 def main():
@@ -457,10 +546,16 @@ def main():
     if INCLUDE_CLEAN_IDENTITY_PAIRS:
         print(f"  Added clean->clean identity pairs: {len(clean_dvectors) // 2}")
 
-    pretrained_layers = greedy_pretrain_layers(noisy_dvectors, clean_dvectors, input_dim, DEVICE, save_dir)
+    pretrained_layers = None
+    if ENABLE_GREEDY_LAYERWISE_PRETRAINING:
+        pretrained_layers = greedy_pretrain_layers(noisy_dvectors, clean_dvectors, input_dim, DEVICE, save_dir)
 
-    print("\n[stack] Assembling full stacked autoencoder")
-    stacked_model = StackedDenoisingAE(pretrained_layers).to(DEVICE)
+    if ENABLE_GREEDY_LAYERWISE_PRETRAINING:
+        print("\n[stack] Assembling full stacked autoencoder from pretrained layers")
+    else:
+        print("\n[stack] Initializing full stacked autoencoder for end-to-end training")
+
+    stacked_model = build_stacked_model(input_dim, DEVICE, pretrained_layers=pretrained_layers)
     if DEVICE == "cuda":
         summary(stacked_model.cuda(), (input_dim,))
     else:
@@ -488,15 +583,18 @@ def main():
         LEARNING_RATE_FINETUNE,
         NUM_EPOCHS_FINETUNE,
         finetune_ckpt,
+        plot_path=save_dir / "stacked_finetune_loss.png",
+        plot_title="Stacked AE Finetune Loss",
     )
 
     final_model_path = save_dir / "final_model.pth"
     torch.save(stacked_model.state_dict(), final_model_path)
 
     config = {
-        "model_type": "greedy_layerwise_stacked",
+        "model_type": "greedy_layerwise_stacked" if ENABLE_GREEDY_LAYERWISE_PRETRAINING else "stacked_end_to_end",
         "input_dim": input_dim,
         "greedy_hidden_dims": list(GREEDY_LAYER_HIDDEN_DIMS),
+        "enable_greedy_layerwise_pretraining": bool(ENABLE_GREEDY_LAYERWISE_PRETRAINING),
         "dropout_rate": float(DROPOUT_RATE),
         "norm_type": str(NORM_TYPE),
         "activation_type": str(ACTIVATION_TYPE),
@@ -534,6 +632,7 @@ def main():
         f.write("=" * 80 + "\n")
         f.write(f"Input dim: {input_dim}\n")
         f.write(f"Hidden dims: {GREEDY_LAYER_HIDDEN_DIMS}\n")
+        f.write(f"Enable greedy layer-wise pretraining: {ENABLE_GREEDY_LAYERWISE_PRETRAINING}\n")
         f.write(f"Dropout rate: {DROPOUT_RATE}\n")
         f.write(f"Norm type: {NORM_TYPE}\n")
         f.write(f"Activation type: {ACTIVATION_TYPE}\n")
@@ -559,6 +658,7 @@ def main():
     print("\nDone.")
     print(f"  Layer checkpoints: {save_dir}")
     print(f"  Best finetune checkpoint: {finetune_ckpt}")
+    print(f"  Finetune loss graph: {save_dir / 'stacked_finetune_loss.png'}")
     print(f"  Final model: {final_model_path}")
     print(f"  Config: {config_path}")
 

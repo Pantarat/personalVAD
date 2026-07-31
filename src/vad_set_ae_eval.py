@@ -45,18 +45,18 @@ from resemblyzer import VoiceEncoder
 # Default paths
 VAD_MODEL_PATH = 'data/eval_dir/models/vad_set_tanh_score1_10ep.pt'
 # VAD_MODEL_PATH = 'vad_set_overlap_trained/vad_set_84_overlap_tanh_score1_200_new.pt'
-AE_MODEL_PATH = 'src/AE_test/test_outputs/models/greedy_finetune_v4/61/mse0p0_cos0p6_neg0p4'
+AE_MODEL_PATH = 'src/AE_test/test_outputs/models/greedy_finetune/61_v2_tests/5_25-7-26'
 # AE_MODEL_PATH = 'src/AE_test/test_outputs/models/908_wOV_finetune_asyminfoNCE_v2/dvector_ae-908_4pct_3utt-50spk+300Dev_5s_100pctmainspk_100pctAmp-mainOnly_otherSingles_pretrain-2000_1e-5_100ep_infonce0.2'
-DATA_TEST = 'data/908_ov_test_ov100pct_main908_babble_500_30-3-2026'
-# DATA_TEST = 'data/overlap_50pct_main672_aug_train_10000'
+DATA_TEST = 'data/121_ov_test_ov100pct_main121_babble_500_27-3-2026'
+# DATA_TEST = 'data/121_ov_test_noOther_main121_500_1-6-2026'
 EMBED_PATH = 'data/embeddings'
 SCORE_TYPE = 1
 BATCH_SIZE = 64
 NUM_WORKERS = 0
 USE_AE = True
 USE_AE_RECONSTRUCTION = True
-TRANSFORM_ENROLLED_DVECTOR_FORSIMSCORE_IN_RECONSTRUCTION = True  # Safer default: avoids inflated target false positives
-TRANSFORM_ENROLLED_VADINPUT_DVECTOR_IN_RECONSTRUCTION = True  # Reconstruction mode only
+TRANSFORM_ENROLLED_DVECTOR_FORSIMSCORE_IN_RECONSTRUCTION = False  # Safer default: avoids inflated target false positives
+TRANSFORM_ENROLLED_VADINPUT_DVECTOR_IN_RECONSTRUCTION = False  # Reconstruction mode only
 RECOMPUTE_SCORES = True  # True: recompute scores with AE, False: use pre-computed scores.scp
 MAIN_SPEAKER_ID = ''  # Default main speaker ID to filter on
 BINARY_CLASSIFICATION = False  # True: 2-class (target vs non-target), False: 3-class (NS, NTSS, TSS)
